@@ -1,0 +1,23 @@
+{
+  "name": "listen-up-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Listening Miner 백엔드 — analyze 엔드포인트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "youtube-transcript": "^1.3.1",
+    "youtubei.js": "^17.0.1"
+  }
+}

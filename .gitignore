@@ -1,0 +1,20 @@
+# 의존성
+node_modules/
+
+# 비밀/환경 — 절대 커밋 금지
+.env
+server/.env
+*.env.local
+
+# 로그
+*.log
+npm-debug.log*
+
+# 로컬 도구/에디터 설정
+.claude/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

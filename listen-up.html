@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Listening Miner</title>
+<style>
+  :root{
+    --bg:#faf9f7; --surface:#ffffff; --border:#e8e6e0; --border2:#d9d7cf;
+    --text:#2c2c2a; --muted:#6f6e69; --hint:#9a988f;
+    --info:#2f6db5; --info-bg:#e9f1fb; --info-bd:#bcd6f2;
+    --purple:#5a4fb0; --purple-bg:#eeecfb;
+    --teal:#0f8466; --teal-bg:#e2f4ee;
+    --danger:#b04a43; --pulse:#fff3c4;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased;}
+  .app{max-width:1080px;margin:0 auto;padding:14px;}
+  .topbar{display:flex;align-items:center;gap:14px;padding:8px 12px;background:var(--surface);
+    border:1px solid var(--border);border-radius:12px;margin-bottom:12px;flex-wrap:wrap;}
+  .brand{font-size:14px;font-weight:600;letter-spacing:-.01em;}
+  .modepill{font-size:10px;color:var(--muted);background:var(--bg);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;}
+  .nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap;}
+  .nav span{font-size:12px;color:var(--muted);padding:5px 10px;border-radius:8px;cursor:pointer;}
+  .nav span.on{color:var(--info);background:var(--info-bg);}
+  .nav span:hover:not(.on){background:var(--bg);}
+  .lib-head{display:flex;align-items:baseline;justify-content:space-between;margin:4px 2px 12px;}
+  .lib-head h2{font-size:17px;font-weight:600;margin:0;}
+  .lib-head .sub{font-size:12px;color:var(--muted);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;}
+  .clipcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;
+    cursor:pointer;transition:border-color .12s;display:flex;flex-direction:column;}
+  .clipcard:hover{border-color:var(--info-bd);}
+  .thumb{aspect-ratio:16/9;background:#2c2c2a;position:relative;display:flex;align-items:center;justify-content:center;}
+  .thumb .lvl{position:absolute;top:7px;left:7px;font-size:10px;font-weight:600;background:rgba(255,255,255,.9);
+    color:#2c2c2a;padding:2px 7px;border-radius:6px;}
+  .thumb .dur{position:absolute;bottom:7px;right:7px;font-size:10px;background:rgba(0,0,0,.6);color:#fff;
+    padding:2px 6px;border-radius:5px;font-variant-numeric:tabular-nums;}
+  .thumb .prog{position:absolute;bottom:0;left:0;height:3px;background:var(--info);}
+  .thumb .ic{font-size:26px;color:#cfcdc5;}
+  .thumb .del{position:absolute;top:7px;right:7px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.55);color:#fff;border-radius:6px;font-size:12px;cursor:pointer;opacity:0;transition:opacity .12s;z-index:2;}
+  .clipcard:hover .thumb .del{opacity:1;}
+  .thumb .del:hover{background:var(--danger);}
+  .clipcard .body{padding:9px 11px 11px;flex:1;display:flex;flex-direction:column;}
+  .clipcard .ttl{font-size:13px;font-weight:600;line-height:1.35;margin-bottom:5px;}
+  .clipcard .tags{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;}
+  .clipcard .t{font-size:9.5px;color:var(--muted);background:var(--bg);border:1px solid var(--border);padding:1px 6px;border-radius:6px;}
+  .clipcard .meta{display:flex;gap:10px;font-size:10.5px;color:var(--hint);margin-top:auto;align-items:center;}
+  .clipcard .meta b{color:var(--muted);font-weight:600;}
+  .clipcard .cont{font-size:10px;color:var(--info);margin-top:6px;}
+  .newbtn{background:var(--surface);border:1px dashed var(--border2);border-radius:12px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);
+    min-height:160px;font-size:13px;gap:6px;}
+  .newbtn:hover{border-color:var(--info-bd);color:var(--info);}
+  .newbtn .pl{font-size:24px;}
+  .clip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 12px;
+    background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;}
+  .clip .l{display:flex;align-items:center;gap:10px;min-width:0;}
+  .clip .back{font-size:12px;color:var(--muted);cursor:pointer;border:1px solid var(--border2);
+    border-radius:8px;padding:4px 9px;white-space:nowrap;}
+  .clip .back:hover{background:var(--bg);}
+  .clip b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .clip small{font-size:11px;color:var(--hint);white-space:nowrap;}
+  .main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:14px;}
+  @media(max-width:760px){.main{grid-template-columns:1fr;}.grid{grid-template-columns:1fr 1fr;}}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;}
+  .player{aspect-ratio:16/9;background:#2c2c2a;border-radius:11px 11px 0 0;display:flex;
+    align-items:center;justify-content:center;position:relative;cursor:pointer;}
+  .player .pp{font-size:30px;color:#d7d5cd;}
+  .player .tc{position:absolute;bottom:8px;left:11px;font-size:11px;color:#b2b0a8;font-variant-numeric:tabular-nums;}
+  .player .mock{position:absolute;top:8px;right:10px;font-size:9px;color:#88867f;}
+  .ctrl{display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  .pill{font-size:12px;padding:4px 10px;border-radius:8px;border:1px solid var(--border2);
+    background:var(--surface);cursor:pointer;color:var(--text);user-select:none;}
+  .pill:hover{background:var(--bg);}
+  .pill.on{background:var(--info-bg);border-color:var(--info-bd);color:var(--info);}
+  .sep{width:1px;height:16px;background:var(--border);}
+  .hintbar{font-size:11.5px;color:var(--muted);padding:7px 12px;border-bottom:1px solid var(--border);
+    background:#fcfbf8;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .hintbar .kbd{font-size:11px;padding:1px 6px;border-radius:5px;background:var(--bg);border:1px solid var(--border2);}
+  .hintbar.active{background:var(--info-bg);color:var(--info);}
+  .tx{padding:6px 4px;max-height:340px;overflow-y:auto;}
+  .ln{display:flex;gap:9px;padding:5px 9px;border-radius:8px;align-items:flex-start;}
+  .ln.cur{background:var(--info-bg);}
+  .ln .ts{font-size:10px;color:var(--hint);min-width:34px;padding-top:5px;cursor:pointer;font-variant-numeric:tabular-nums;}
+  .ln .ts:hover{color:var(--info);text-decoration:underline;}
+  .ln p{margin:0;font-size:14.5px;flex:1;user-select:none;-webkit-user-select:none;}
+  .w{cursor:pointer;border-radius:4px;padding:0 1px;transition:background .08s;user-select:none;-webkit-user-select:none;touch-action:manipulation;}
+  .w:hover{background:#eee9dd;}
+  .w.mined{box-shadow:inset 0 -2px 0 var(--info-bd);}
+  .w.anchor{background:var(--info);color:#fff;}
+  .w.pulse{animation:pulse .6s ease;}
+  @keyframes pulse{0%{background:var(--pulse);}100%{background:transparent;}}
+  .bm{cursor:pointer;color:var(--hint);font-size:13px;padding-top:4px;}
+  .bm:hover{color:var(--info);}
+  .panel{display:flex;flex-direction:column;min-height:420px;}
+  .tabs{display:flex;border-bottom:1px solid var(--border);}
+  .tabs div{flex:1;text-align:center;font-size:12.5px;padding:10px 0;cursor:pointer;color:var(--muted);}
+  .tabs div.on{color:var(--text);font-weight:600;box-shadow:inset 0 -2px 0 var(--info);}
+  .tabs .cnt{font-size:10px;color:var(--hint);margin-left:4px;}
+  .list{padding:10px;display:flex;flex-direction:column;gap:8px;flex:1;overflow-y:auto;max-height:430px;}
+  .empty{font-size:12px;color:var(--hint);text-align:center;padding:30px 10px;line-height:1.7;}
+  .item{border:1px solid var(--border);border-radius:9px;padding:8px 10px;position:relative;background:var(--surface);}
+  .item .x{position:absolute;top:6px;right:7px;font-size:12px;color:var(--hint);cursor:pointer;
+    width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:5px;}
+  .item .x:hover{background:#f6e9e8;color:var(--danger);}
+  .item .hd{display:flex;align-items:center;gap:6px;margin-bottom:3px;padding-right:18px;flex-wrap:wrap;}
+  .item .hw{font-size:13px;font-weight:600;}
+  .item .ts2{font-size:10px;color:var(--info);cursor:pointer;font-variant-numeric:tabular-nums;}
+  .item .ts2:hover{text-decoration:underline;}
+  .badge{font-size:9.5px;padding:1px 6px;border-radius:6px;font-weight:600;}
+  .b-word{background:var(--info-bg);color:var(--info);}
+  .b-phrase{background:var(--purple-bg);color:var(--purple);}
+  .b-sent{background:var(--teal-bg);color:var(--teal);}
+  .item .ctx{font-size:11px;color:var(--muted);line-height:1.5;margin:2px 0 6px;}
+  .item .ctx mark{background:#fdf3cf;color:inherit;padding:0 1px;border-radius:3px;}
+  .metarow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .tag{font-size:9.5px;color:var(--purple);background:var(--purple-bg);border:1px solid #e0dcf6;padding:2px 8px;border-radius:7px;cursor:text;user-select:none;}
+  .tag:hover{filter:brightness(.97);}
+  .tag-add{color:var(--hint);background:var(--bg);border:1px dashed var(--border2);}
+  .loadingtag{font-size:9.5px;color:var(--hint);font-style:italic;}
+  .reveal{font-size:10.5px;color:var(--info);cursor:pointer;user-select:none;margin-left:auto;}
+  .reveal:hover{text-decoration:underline;}
+  .meaning{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);}
+  .meaning .ko{font-size:12.5px;color:var(--text);}
+  .meaning .en{font-size:11px;color:var(--muted);margin-top:2px;font-style:italic;}
+  .meaning .ph{font-size:11px;color:var(--hint);}
+  .foot{padding:9px 10px;border-top:1px solid var(--border);}
+  .foot .row{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:7px;}
+  .review{width:100%;font-size:12.5px;padding:8px 0;border-radius:8px;border:1px solid var(--info-bd);
+    background:var(--info-bg);color:var(--info);cursor:pointer;font-weight:600;font-family:inherit;}
+  .note-mock{font-size:11px;color:var(--muted);text-align:center;margin-top:14px;line-height:1.6;}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#2c2c2a;color:#fff;
+    font-size:12.5px;padding:8px 16px;border-radius:9px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;}
+  .toast.show{opacity:1;}
+  .rv-top{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .rv-top .close{font-size:13px;color:var(--muted);cursor:pointer;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:5px 11px;}
+  .rv-bar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
+  .rv-bar i{display:block;height:100%;background:var(--info);transition:width .25s;}
+  .rv-bar-txt{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .rv-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:30px 24px;text-align:center;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+  .rv-play{width:64px;height:64px;border-radius:50%;background:#2c2c2a;color:#fff;font-size:24px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .rv-play:hover{background:#41413d;}
+  .rv-seg{font-size:11px;color:var(--hint);margin-top:10px;font-variant-numeric:tabular-nums;}
+  .rv-q{font-size:13px;color:var(--muted);margin-top:18px;}
+  .rv-show{margin-top:20px;font-size:13px;color:var(--info);background:var(--info-bg);border:1px solid var(--info-bd);border-radius:9px;padding:9px 22px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .rv-hw{font-size:24px;font-weight:600;letter-spacing:-.01em;}
+  .rv-badge{display:inline-block;margin-top:8px;}
+  .rv-ko{font-size:15px;margin-top:14px;}
+  .rv-en{font-size:12.5px;color:var(--muted);font-style:italic;margin-top:4px;}
+  .rv-ctx{font-size:13px;color:var(--muted);margin-top:16px;line-height:1.6;max-width:440px;}
+  .rv-ctx mark{background:#fdf3cf;padding:0 2px;border-radius:3px;}
+  .rv-replay{margin-top:16px;font-size:12px;color:var(--info);cursor:pointer;background:none;border:none;font-family:inherit;}
+  .rv-rate{display:flex;gap:10px;margin-top:24px;}
+  .rv-rate button{font-family:inherit;font-size:13px;font-weight:600;padding:11px 0;width:96px;border-radius:10px;cursor:pointer;border:1px solid var(--border2);background:var(--surface);}
+  .rv-again{color:var(--danger);border-color:#e6cac7;} .rv-again:hover{background:#fbf0ef;}
+  .rv-soso{color:#9a6a12;border-color:#ecd9b0;} .rv-soso:hover{background:#fcf5e8;}
+  .rv-good{color:var(--teal);border-color:#bfe6d8;} .rv-good:hover{background:#eef8f4;}
+  .rv-done{text-align:center;padding:44px 20px;} .rv-done .big{font-size:40px;}
+  .rv-done h3{font-size:18px;margin:10px 0 4px;} .rv-done p{font-size:13px;color:var(--muted);margin:0 0 18px;}
+  .rv-empty{text-align:center;padding:50px 20px;color:var(--hint);font-size:13px;line-height:1.7;}
+  .rv-src{font-size:11px;color:var(--hint);margin-bottom:14px;}
+  .sbar{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 15px;margin-bottom:14px;}
+  .frow{display:flex;align-items:flex-start;gap:12px;margin-bottom:11px;flex-wrap:wrap;}
+  .frow:last-child{margin-bottom:0;}
+  .flab{font-size:12px;color:var(--muted);min-width:62px;padding-top:5px;}
+  .range{display:flex;align-items:center;gap:10px;flex:1;min-width:220px;}
+  .range input[type=range]{flex:1;min-width:80px;}
+  .rdo{font-size:12px;color:var(--info);font-weight:600;min-width:74px;text-align:right;font-variant-numeric:tabular-nums;}
+  .chip{font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--border2);background:var(--surface);cursor:pointer;color:var(--text);user-select:none;}
+  .chip.on{background:var(--info-bg);border-color:var(--info-bd);color:var(--info);}
+  .addbtn{font-size:11.5px;font-weight:600;padding:5px 13px;border-radius:8px;border:1px solid var(--info-bd);background:var(--info-bg);color:var(--info);cursor:pointer;user-select:none;}
+  .addbtn:hover{filter:brightness(.97);}
+  .addbtn.added,.addbtn.busy{background:var(--bg);border-color:var(--border);color:var(--hint);cursor:default;}
+  .resmeta{font-size:10.5px;color:var(--hint);}
+  .nores{text-align:center;color:var(--hint);font-size:13px;padding:36px 20px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+
+/* ╔══════════════════════════════════════════════════════════════════════╗
+   ║  LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)               ║
+   ║                                                                        ║
+   ║  ▶ 현재 상태: 프런트는 완성, 데이터는 mock.                             ║
+   ║  ▶ 백엔드를 붙이려면 아래 [API LAYER] 한 블록만 건드리면 됨:            ║
+   ║      1) USE_BACKEND = true 로 변경                                      ║
+   ║      2) API_BASE 를 서버 주소로                                         ║
+   ║      3) 서버에 아래 3개 엔드포인트 구현 (요청/응답 계약은 각 함수 주석):  ║
+   ║          POST /api/analyze     {text,type}        → {ko,en,tag}        ║
+   ║          POST /api/search      {minSec,maxSec,...} → [{id,title,...}]   ║
+   ║          POST /api/transcript  {videoId}          → [{start,end,text}] ║
+   ║      · analyze 의 tag 는 반드시 FUNCTION_TAGS 안의 값만 (서버에서 강제). ║
+   ║      · 실제 fetch 코드는 이미 작성돼 있음. 스위치만 켜면 호출됨.         ║
+   ║  ▶ 남은 1곳: 가짜 플레이어(시계) → YouTube IFrame API (Study 컴포넌트).  ║
+   ╚══════════════════════════════════════════════════════════════════════╝ */
+
+/* ── 기능 태그 프리셋 (사용자 단어장에서 추출·확정) ──────
+   analyze 백엔드는 이 목록을 시스템 프롬프트에 넣어 이 안에서만 tag 를 고르게 할 것 */
+const FUNCTION_TAGS=[
+  {group:"묘사·진술",tags:["상태","변화","움직임","감각","생각·판단","추측","전언","인과·사건","사역·유발","상황·조건","장소·공간","묘사·설명","시간","강조","정도·수량","성향·성격"]},
+  {group:"요청·해결",tags:["부탁·바람","제안·충고","설득·강요","허락","시도·노력","어려움·문제","쉬움·수월","성공·해결","금지·방해","거절·꺼림","궁금·확인"]},
+  {group:"의지·추측",tags:["계획·의도","의무·확신","결심","가정"]},
+  {group:"논리·주장",tags:["의견·주장","포함·관계","반박·대조","따지기·반문","인과·결론","경고·비난","비교","화제 전환"]},
+  {group:"감정·경험",tags:["감사·기쁨","슬픔·미움","짜증·화남","우려·사과","공감","안정","선택·기회","취향·취미","돈·시간","배움·목표"]},
+];
+
+/* ════════════════════════════════════════════════════════
+   API LAYER  ←★ 백엔드 연동은 여기만 수정
+   ════════════════════════════════════════════════════════ */
+const USE_BACKEND = true;                   // ←★ 켜짐: /api/analyze 호출 (mock 끄려면 false)
+const API_BASE    = location.protocol === "file:" ? "http://localhost:3001" : ""; // 서버가 직접 서빙하면 상대경로(같은 출처); file:// 로 열면 localhost
+const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
+
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+// POST /api/analyze   body:{ text, type:"word"|"phrase"|"sentence" }
+//   → { ko:string, en:string, tag:string }   (tag 는 FUNCTION_TAGS 안의 값 또는 "")
+async function analyze(text, type){
+  if(USE_BACKEND){
+    try{
+      const res=await fetch(API_BASE+"/api/analyze",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({text,type})});
+      if(!res.ok) throw new Error("analyze "+res.status);
+      return await res.json();
+    }catch(e){ console.error("analyze failed:",e); return {ko:"",en:"",tag:""}; }
+  }
+  await sleep(MOCK_DELAY); return mockAnalyze(text,type);
+}
+
+// POST /api/search   body:{ minSec, maxSec, maxLevel:"A2"|"B1"|"B2"|"C1", topics:string[] }
+//   → [{ id, title, channel, level, topics:string[], total:seconds }]   (대본 미포함)
+async function searchVideos(filters){
+  if(USE_BACKEND){
+    try{
+      const res=await fetch(API_BASE+"/api/search",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify(filters)});
+      if(!res.ok) throw new Error("search "+res.status);
+      return await res.json();
+    }catch(e){ console.error("search failed:",e); return []; }
+  }
+  await sleep(120); return mockSearch(filters);
+}
+
+// POST /api/transcript   body:{ videoId }
+//   → [{ start:seconds, end:seconds, text }]
+//   ⚠ 유튜브 자막은 공식 API가 없어 비공식 추출에 의존 → 가장 잘 깨지는 지점. 실패 시 [] 반환·UI 처리 필요.
+async function fetchTranscript(videoId){
+  if(USE_BACKEND){
+    try{
+      const res=await fetch(API_BASE+"/api/transcript",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({videoId})});
+      if(!res.ok) throw new Error("transcript "+res.status);
+      return await res.json();
+    }catch(e){ console.error("transcript failed:",e); return []; }
+  }
+  await sleep(MOCK_DELAY); return mockTranscript(videoId);
+}
+
+// POST /api/import   body:{ url }
+//   → { id, title, channel, level, topics, total }   (URL/ID 로 직접 가져오기; 대본 미포함)
+async function importVideo(url){
+  if(USE_BACKEND){
+    try{
+      const res=await fetch(API_BASE+"/api/import",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
+      if(!res.ok) throw new Error("import "+res.status);
+      return await res.json();
+    }catch(e){ console.error("import failed:",e); return null; }
+  }
+  await sleep(MOCK_DELAY); return null; // mock 모드에선 미지원
+}
+
+/* ── mock 구현 (USE_BACKEND=true 면 호출 안 됨) ───────────── */
+function mockAnalyze(text,type){
+  const key=text.toLowerCase().replace(/[.,!?;:]+$/,"").trim();
+  if(LEX[key]) return {...LEX[key]};
+  return {ko:"",en:"",tag:""};
+}
+function mockSearch({minSec,maxSec,maxLevel,topics}){
+  return RESULTS
+    .filter(r=>{
+      if(r.total<minSec||r.total>maxSec) return false;
+      if(LEVELS.indexOf(r.level)>LEVELS.indexOf(maxLevel)) return false;
+      if(topics.length && !r.topics.some(t=>topics.includes(t))) return false;
+      return true;
+    })
+    .map(({tx,...meta})=>meta); // 실제 /api/search 처럼 대본은 빼고 메타데이터만
+}
+function mockTranscript(videoId){ const r=RESULTS.find(x=>x.id===videoId); return r?r.tx:[]; }
+
+/* ════════════════════════════════════════════════════════
+   MOCK DATA  ←★ 백엔드 붙이면 전부 불필요 (서버가 대체)
+   ════════════════════════════════════════════════════════ */
+const TX_DESERT=[
+  {start:0,end:6,text:"Most people think the desert is completely empty, but that's far from the truth."},
+  {start:6,end:12,text:"Underneath the sand, an entire ecosystem is quietly thriving."},
+  {start:12,end:18,text:"The inevitable outcome of so little rain is that every drop of water becomes precious."},
+  {start:18,end:25,text:"We really look forward to showing you how these animals adapt."},
+  {start:25,end:31,text:"Some of them can go their whole lives without ever drinking water directly."},
+  {start:31,end:37,text:"But there's a catch that nobody really mentions."},
+  {start:37,end:44,text:"When the temperature drops at night, the whole landscape transforms."},
+  {start:44,end:51,text:"Creatures that were hiding all day suddenly come out to hunt."},
+  {start:51,end:58,text:"And that's when the desert truly comes alive."},
+];
+const TX_COFFEE=[
+  {start:0,end:7,text:"To be honest, most of what you've heard about caffeine is a bit of a myth."},
+  {start:7,end:14,text:"It doesn't actually give you energy; it just blocks the signal that makes you feel tired."},
+  {start:14,end:21,text:"So in a sense, you're borrowing alertness that you'll have to pay back later."},
+  {start:21,end:28,text:"That's why the afternoon crash can hit you so hard."},
+  {start:28,end:35,text:"The trick is to wait about ninety minutes after waking before your first cup."},
+  {start:35,end:42,text:"It sounds counterintuitive, but it makes a world of difference."},
+];
+const TX_WAVES=[
+  {start:0,end:8,text:"Have you ever wondered what actually makes an ocean wave?"},
+  {start:8,end:16,text:"It's tempting to think the water travels to the shore, but that's not quite right."},
+  {start:16,end:24,text:"In reality, the water mostly stays put and just moves up and down."},
+  {start:24,end:33,text:"What travels is the energy, passed along from one particle to the next."},
+  {start:33,end:42,text:"By the time it reaches you, that energy may have crossed an entire ocean."},
+];
+const TX_NAMES=[
+  {start:0,end:9,text:"Why is it so easy to forget someone's name right after you hear it?"},
+  {start:9,end:18,text:"The truth is, you were probably never really paying attention in the first place."},
+  {start:18,end:27,text:"When you meet someone, your brain is busy planning what to say next."},
+  {start:27,end:36,text:"So the name goes in one ear and out the other, so to speak."},
+  {start:36,end:46,text:"A simple fix is to repeat the name out loud as soon as you hear it."},
+];
+const TX_ORDER=[
+  {start:0,end:8,text:"Ordering coffee abroad can feel surprisingly stressful at first."},
+  {start:8,end:16,text:"But honestly, a few simple phrases will get you through almost anywhere."},
+  {start:16,end:24,text:"Start with a friendly hello, then just say what you'd like, please."},
+  {start:24,end:33,text:"A smile and a thank you go a long way in any language."},
+];
+const TX_TOKYO=[
+  {start:0,end:9,text:"The fish market wakes up long before the rest of the city does."},
+  {start:9,end:18,text:"By five in the morning, the auction floor is already buzzing with energy."},
+  {start:18,end:27,text:"It's a tradition that has gone on, more or less unchanged, for decades."},
+  {start:27,end:37,text:"And the freshest sushi you'll ever taste is waiting just around the corner."},
+];
+const TX_SOUR=[
+  {start:0,end:9,text:"Sourdough rises without any commercial yeast at all."},
+  {start:9,end:18,text:"Instead, it relies on wild yeast and bacteria living in the starter."},
+  {start:18,end:27,text:"As they feed on the flour, they release gas that gets trapped in the dough."},
+  {start:27,end:36,text:"That's what gives the bread its airy texture and tangy flavor."},
+  {start:36,end:46,text:"Patience is the real ingredient — good bread simply can't be rushed."},
+];
+
+const LEX={
+  "inevitable":{ko:"피할 수 없는, 불가피한",en:"certain to happen; unavoidable",tag:"의무·확신"},
+  "thriving":{ko:"번성하는, 잘 자라는",en:"growing or developing well",tag:"상태"},
+  "precious":{ko:"귀중한, 소중한",en:"of great value",tag:"묘사·설명"},
+  "adapt":{ko:"적응하다",en:"to adjust to new conditions",tag:"변화"},
+  "catch":{ko:"함정, 숨은 문제점",en:"a hidden drawback",tag:"반박·대조"},
+  "transforms":{ko:"완전히 바뀌다",en:"changes completely",tag:"변화"},
+  "ecosystem":{ko:"생태계",en:"a community of living things",tag:""},
+  "creatures":{ko:"생물, 생명체",en:"living things, animals",tag:""},
+  "landscape":{ko:"풍경, 경관",en:"the visible features of an area",tag:""},
+  "look forward to":{ko:"~을 고대하다, 기대하다",en:"to anticipate with pleasure",tag:"부탁·바람"},
+  "far from the truth":{ko:"사실과 거리가 먼",en:"not true at all",tag:"반박·대조"},
+  "that's far from the truth":{ko:"그건 전혀 사실이 아니다",en:"that is not true at all",tag:"반박·대조"},
+  "there's a catch":{ko:"단서가 있다, 함정이 있다",en:"there is a hidden problem",tag:"반박·대조"},
+  "comes alive":{ko:"생기를 띠다, 활기를 띠다",en:"becomes lively and active",tag:"묘사·설명"},
+  "without ever":{ko:"한 번도 ~하지 않고",en:"not at any time",tag:"강조"},
+  "to be honest":{ko:"솔직히 말하면",en:"speaking frankly",tag:"화제 전환"},
+  "a bit of a myth":{ko:"다소 잘못된 통념",en:"largely a false belief",tag:"반박·대조"},
+  "counterintuitive":{ko:"직관에 어긋나는",en:"opposite to what you'd expect",tag:"반박·대조"},
+  "makes a world of difference":{ko:"엄청난 차이를 만든다",en:"has a huge positive effect",tag:"강조"},
+  "in a sense":{ko:"어떤 의미에서는",en:"in one way of looking at it",tag:"강조"},
+  "that's not quite right":{ko:"그게 딱 맞는 말은 아니다",en:"that is not entirely correct",tag:"반박·대조"},
+  "stays put":{ko:"제자리에 머물다",en:"remains in place",tag:"상태"},
+  "in one ear and out the other":{ko:"한 귀로 듣고 한 귀로 흘리다",en:"immediately forgotten",tag:"생각·판단"},
+  "in the first place":{ko:"애초에",en:"to begin with",tag:"강조"},
+  "so to speak":{ko:"말하자면",en:"as it were",tag:"강조"},
+  "go a long way":{ko:"큰 도움이 되다",en:"to be very helpful",tag:"강조"},
+  "get you through":{ko:"~을 헤쳐 나가게 해주다",en:"to help you cope",tag:"시도·노력"},
+  "more or less":{ko:"대체로, 거의",en:"approximately; mostly",tag:"정도·수량"},
+  "around the corner":{ko:"코앞에, 임박한",en:"very near or about to happen",tag:"시간"},
+  "can't be rushed":{ko:"서둘러선 안 된다",en:"needs time; cannot be hurried",tag:"시간"},
+};
+
+const seedClips=()=>[
+  {id:"desert",title:"Why the desert isn't empty",channel:"Nat geo shorts",level:"B1",
+   topics:["자연·환경","과학"],transcript:TX_DESERT,total:58,pos:14,plays:3,
+   vocab:[
+     {id:101,type:"phrase",text:"look forward to",sentence:TX_DESERT[3].text,ts:18,ko:LEX["look forward to"].ko,en:LEX["look forward to"].en,tag:"부탁·바람"},
+     {id:102,type:"word",text:"inevitable",sentence:TX_DESERT[2].text,ts:12,ko:LEX["inevitable"].ko,en:LEX["inevitable"].en,tag:"의무·확신"},
+   ],
+   marks:[{id:201,start:31,end:37,label:TX_DESERT[5].text,note:"there's a catch — 연음 안 들림"}]},
+  {id:"coffee",title:"The caffeine myth, explained",channel:"How things work",level:"B2",
+   topics:["과학","건강"],transcript:TX_COFFEE,total:42,pos:0,plays:0,vocab:[],marks:[]},
+];
+
+const RESULTS=[
+  {id:"waves",title:"How ocean waves really work",channel:"Science simplified",level:"B1",topics:["자연·환경","과학"],total:42,tx:TX_WAVES},
+  {id:"names",title:"Why you forget names instantly",channel:"Mind matters",level:"B2",topics:["과학","심리"],total:46,tx:TX_NAMES},
+  {id:"order",title:"Order coffee like a local",channel:"Travel basics",level:"A2",topics:["여행","일상"],total:33,tx:TX_ORDER},
+  {id:"tokyo",title:"A morning at the Tokyo fish market",channel:"City walks",level:"B1",topics:["여행","일상"],total:37,tx:TX_TOKYO},
+  {id:"sour",title:"The science of sourdough bread",channel:"Kitchen science",level:"B2",topics:["과학","요리"],total:46,tx:TX_SOUR},
+];
+const LEVELS=["A2","B1","B2","C1"];
+const LEVEL_KO=["입문","초급","중급","중상급","고급"];
+const LEVEL_KO_TO_CEFR=["A2","B1","C1"];
+
+const fmt=s=>{ s=Math.max(0,Math.floor(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+const clean=t=>t.replace(/^[^A-Za-z'’-]+|[^A-Za-z'’-]+$/g,"");
+let _id=1000; const uid=()=>_id++;
+
+/* ════════════════════════════════════════════════════════
+   UI COMPONENTS
+   ════════════════════════════════════════════════════════ */
+function Top({screen,onNav}){
+  return (
+    <div className="topbar">
+      <span className="brand">Listening Miner</span>
+      {!USE_BACKEND && <span className="modepill">mock 모드</span>}
+      <div className="nav">
+        <span className={screen==="library"?"on":""} onClick={()=>onNav("library")}>라이브러리</span>
+        <span className={screen==="search"?"on":""} onClick={()=>onNav("search")}>검색</span>
+        <span className={screen==="study"?"on":""} onClick={()=>onNav("study")}>학습</span>
+        <span className={screen==="browse"?"on":""} onClick={()=>onNav("browse")}>모아보기</span>
+        <span onClick={()=>onNav("review")}>복습</span>
+      </div>
+    </div>
+  );
+}
+
+function Library({clips,onOpen,onSearch,onNav,onRemove}){
+  const totalVocab=clips.reduce((s,c)=>s+c.vocab.length,0);
+  return (
+    <div className="app">
+      <Top screen="library" onNav={onNav}/>
+      <div className="lib-head">
+        <h2>내 라이브러리</h2>
+        <span className="sub">클립 {clips.length} · 저장한 표현 {totalVocab}</span>
+      </div>
+      <div className="grid">
+        {clips.map(c=>{
+          const pct=c.total?Math.round(c.pos/c.total*100):0;
+          return (
+            <div className="clipcard" key={c.id} onClick={()=>onOpen(c.id)}>
+              <div className="thumb">
+                <span className="lvl">{c.level}</span><span className="ic">▶</span>
+                <span className="dur">{fmt(c.total)}</span>
+                {pct>0 && <span className="prog" style={{width:pct+"%"}}></span>}
+                <span className="del" title="클립 삭제" onClick={e=>{e.stopPropagation(); onRemove(c.id);}}>✕</span>
+              </div>
+              <div className="body">
+                <div className="ttl">{c.title}</div>
+                <div className="tags">{c.topics.map(t=><span className="t" key={t}>{t}</span>)}</div>
+                <div className="meta">
+                  <span><b>{c.vocab.length}</b> 표현</span>
+                  <span><b>{c.marks.length}</b> 책갈피</span>
+                  <span>{c.plays>0?c.plays+"회 들음":"새 클립"}</span>
+                </div>
+                {c.pos>0 && c.pos<c.total && <div className="cont">▶ 이어듣기 {fmt(c.pos)}</div>}
+              </div>
+            </div>
+          );
+        })}
+        <div className="newbtn" onClick={onSearch}>
+          <span className="pl">+</span>검색해서 새 클립 추가
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VocabCard({it,onSeek,onRemove,onTag}){
+  const [open,setOpen]=useState(false);
+  const [editing,setEditing]=useState(false);
+  const lo=it.sentence.toLowerCase(), tl=it.text.toLowerCase(), i=lo.indexOf(tl);
+  const ctx=i<0?it.sentence:<>{it.sentence.slice(0,i)}<mark>{it.sentence.slice(i,i+it.text.length)}</mark>{it.sentence.slice(i+it.text.length)}</>;
+  return (
+    <div className="item">
+      <span className="x" onClick={()=>onRemove(it.id)}>✕</span>
+      <div className="hd">
+        <span className="hw">{it.text}</span>
+        <span className={"badge "+(it.type==="word"?"b-word":it.type==="phrase"?"b-phrase":"b-sent")}>
+          {it.type==="word"?"단어":it.type==="phrase"?"구문":"문장"}</span>
+        <span className="ts2" onClick={()=>onSeek(it.ts)}>{fmt(it.ts)}</span>
+      </div>
+      {it.type!=="sentence" && <div className="ctx">{ctx}</div>}
+      <div className="metarow">
+        {it.loading
+          ? <span className="loadingtag">분석 중…</span>
+          : editing
+            ? <select autoFocus defaultValue={it.tag}
+                style={{fontSize:"11px",padding:"3px 5px",borderRadius:"7px",border:"1px solid var(--info-bd)",fontFamily:"inherit",background:"#fff",color:"var(--text)",maxWidth:"170px"}}
+                onChange={e=>{ onTag(it.id,e.target.value); setEditing(false); }}
+                onBlur={()=>setEditing(false)}>
+                <option value="">태그 없음</option>
+                {FUNCTION_TAGS.map(g=>(
+                  <optgroup key={g.group} label={g.group}>
+                    {g.tags.map(t=><option key={t} value={t}>{t}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            : (it.tag
+                ? <span className="tag" title="클릭해서 기능 태그 변경" onClick={()=>setEditing(true)}>#{it.tag}</span>
+                : <span className="tag tag-add" title="기능 태그 달기" onClick={()=>setEditing(true)}>+ 태그</span>)}
+        {!it.loading && <span className="reveal" onClick={()=>setOpen(o=>!o)}>{open?"뜻 숨기기":"뜻 보기"}</span>}
+      </div>
+      {open && !it.loading && <div className="meaning">
+        {it.ko?<><div className="ko">{it.ko}</div>{it.en && <div className="en">{it.en}</div>}</>
+          :<div className="ph">뜻 없음 (analyze 결과 비어 있음)</div>}
+      </div>}
+    </div>
+  );
+}
+
+/* YouTube IFrame API 로더 — 한 번만 로드하고 준비되면 resolve */
+let _ytApiPromise;
+function loadYouTubeAPI(){
+  if(_ytApiPromise) return _ytApiPromise;
+  _ytApiPromise=new Promise(resolve=>{
+    if(window.YT && window.YT.Player){ resolve(window.YT); return; }
+    const prev=window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady=()=>{ if(prev)prev(); resolve(window.YT); };
+    const tag=document.createElement("script");
+    tag.src="https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+  });
+  return _ytApiPromise;
+}
+
+function Study({clip,initialTime,onClose,onReview,onNav}){
+  const [time,setTime]=useState(initialTime!=null?initialTime:(clip.pos||0));
+  const [playing,setPlaying]=useState(false);
+  const [speed,setSpeed]=useState(1);
+  const [loop,setLoop]=useState(false);
+  const loopRange=useRef(null);
+  const [tab,setTab]=useState("vocab");
+  const [vocab,setVocab]=useState(clip.vocab);
+  const [marks,setMarks]=useState(clip.marks);
+  const [phraseMode,setPhraseMode]=useState(false);
+  const [anchor,setAnchor]=useState(null);
+  const [pulse,setPulse]=useState(null);
+  const [toast,setToast]=useState("");
+  const toastT=useRef();
+  const playerRef=useRef(null);   // YT.Player 인스턴스
+  const ytBoxRef=useRef(null);    // 플레이어가 들어갈 div
+  const TX=clip.transcript, TOTAL=clip.total;
+  const curIdx=TX.findIndex(l=>time>=l.start && time<l.end);
+
+  /* 실제 YouTube IFrame 플레이어 — 마운트 시 생성해 clip.id 영상을 로드.
+     (React 충돌 방지를 위해 ytBox 안에 host div 를 직접 만들어 YT 가 교체하게 함) */
+  useEffect(()=>{
+    let destroyed=false;
+    loadYouTubeAPI().then(YT=>{
+      if(destroyed||!ytBoxRef.current) return;
+      const host=document.createElement("div");
+      host.style.width="100%"; host.style.height="100%";
+      ytBoxRef.current.appendChild(host);
+      playerRef.current=new YT.Player(host,{
+        videoId:clip.id, width:"100%", height:"100%",
+        playerVars:{rel:0, modestbranding:1, playsinline:1},
+        events:{
+          onReady:()=>{ try{ playerRef.current.setPlaybackRate(speed);
+            if(time>0) playerRef.current.seekTo(time,true); }catch(e){} },
+          onStateChange:e=>{ const S=window.YT.PlayerState;
+            if(e.data===S.PLAYING) setPlaying(true);
+            else if(e.data===S.PAUSED||e.data===S.ENDED) setPlaying(false); },
+        },
+      });
+    });
+    return ()=>{ destroyed=true;
+      try{ playerRef.current && playerRef.current.destroy(); }catch(e){}
+      playerRef.current=null;
+      if(ytBoxRef.current) ytBoxRef.current.innerHTML=""; };
+  },[clip.id]);
+
+  /* 재생 중에는 플레이어의 현재시간을 폴링해 time 갱신 + 구간 반복 처리 */
+  useEffect(()=>{
+    if(!playing) return;
+    const iv=setInterval(()=>{
+      const p=playerRef.current; if(!p||!p.getCurrentTime) return;
+      let t=p.getCurrentTime();
+      if(loop&&loopRange.current&&t>=loopRange.current.end){ try{p.seekTo(loopRange.current.start,true);}catch(e){} t=loopRange.current.start; }
+      setTime(t);
+    },200);
+    return ()=>clearInterval(iv);
+  },[playing,loop]);
+
+  const flash=m=>{ setToast(m); clearTimeout(toastT.current); toastT.current=setTimeout(()=>setToast(""),1500); };
+  const seek=s=>{ setTime(s); try{ playerRef.current && playerRef.current.seekTo(s,true); }catch(e){} };
+  const cur=()=>({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays});
+  const save=()=>onClose({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays+(time>2?1:0)});
+
+  const toggleLoop=()=>{
+    if(!loop){ const l=TX[curIdx>=0?curIdx:0]; loopRange.current={start:l.start,end:l.end};
+      setLoop(true); flash("구간 반복 · "+fmt(l.start)+"–"+fmt(l.end)); }
+    else{ loopRange.current=null; setLoop(false); }
+  };
+  const cycleSpeed=()=>{ const seq=[0.75,1,1.25,1.5]; const ns=seq[(seq.indexOf(speed)+1)%seq.length];
+    setSpeed(ns); try{ playerRef.current && playerRef.current.setPlaybackRate(ns); }catch(e){} };
+
+  /* 저장: 카드 먼저 띄우고(optimistic) → analyze 비동기 → 결과 채움 */
+  const addVocab=async (type,text,li)=>{
+    const id=uid();
+    setVocab(v=>[{id,type,text,sentence:TX[li].text,ts:TX[li].start,ko:"",en:"",tag:"",loading:true},...v]);
+    setTab("vocab");
+    flash((type==="word"?"단어":type==="phrase"?"구문":"문장")+" 저장 · 분석 중…");
+    const a=await analyze(text,type);
+    setVocab(v=>v.map(x=>x.id===id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
+  };
+  const setTag=(id,tag)=>setVocab(v=>v.map(x=>x.id===id?{...x,tag}:x));
+  const onWord=(li,wi,tok)=>{
+    if(phraseMode){
+      if(!anchor){ setAnchor({li,wi}); return; }
+      if(anchor.li!==li){ setAnchor({li,wi}); return; }
+      const a=Math.min(anchor.wi,wi), b=Math.max(anchor.wi,wi);
+      addVocab("phrase",clean(TX[li].text.split(/\s+/).slice(a,b+1).join(" ")),li);
+      setAnchor(null); setPhraseMode(false);
+    }else{ setPulse(li+":"+wi); setTimeout(()=>setPulse(null),600); addVocab("word",clean(tok),li); }
+  };
+  const bookmarkSeg=()=>{ const l=TX[curIdx>=0?curIdx:0];
+    setMarks(m=>[{id:uid(),start:l.start,end:l.end,label:l.text,note:""},...m]);
+    setTab("bookmark"); flash("책갈피 · "+fmt(l.start)+"–"+fmt(l.end)); };
+  const playSeg=(s,e)=>{ loopRange.current={start:s,end:e}; setLoop(true); seek(s);
+    try{ playerRef.current && playerRef.current.playVideo(); }catch(e){} setPlaying(true); };
+
+  return (
+    <div className="app">
+      <Top screen="study" onNav={s=>onNav(s,cur())}/>
+      <div className="clip">
+        <div className="l"><span className="back" onClick={save}>← 라이브러리</span><b>{clip.title}</b></div>
+        <small>{clip.plays>0?clip.plays+"번째 · ":""}{fmt(time)} / {fmt(TOTAL)}</small>
+      </div>
+      <div className="main">
+        <div className="card">
+          <div className="player" style={{cursor:"default"}}>
+            <div ref={ytBoxRef} style={{position:"absolute",inset:0,width:"100%",height:"100%"}}></div>
+          </div>
+          <div className="ctrl">
+            <span className="pill" onClick={cycleSpeed}>{speed.toFixed(2).replace(/0$/,"")}x</span>
+            <span className="sep"></span>
+            <span className={"pill"+(loop?" on":"")} onClick={toggleLoop}>↻ 구간 반복</span>
+            <span className="sep"></span>
+            <span className="pill" onClick={bookmarkSeg}>🔖 책갈피</span>
+            <span className="sep"></span>
+            <span className={"pill"+(phraseMode?" on":"")} onClick={()=>{setPhraseMode(m=>!m);setAnchor(null);}}>구문 잡기</span>
+          </div>
+          <div className={"hintbar"+(phraseMode?" active":"")}>
+            {phraseMode
+              ? (anchor?"끝 단어를 탭하세요 (같은 문장 안)":"시작 단어를 탭하세요 · 버튼 다시 누르면 취소")
+              : (<><span className="kbd">단어 탭</span> 단어 · <span className="kbd">구문 잡기 → 두 단어</span> 구문 · <span className="kbd">🔖</span> 문장</>)}
+          </div>
+          <div className="tx">
+            {TX.map((l,li)=>(
+              <div key={li} className={"ln"+(li===curIdx?" cur":"")}>
+                <span className="ts" onClick={()=>seek(l.start)}>{fmt(l.start)}</span>
+                <p>
+                  {l.text.split(/\s+/).map((tok,wi)=>{
+                    const k=li+":"+wi;
+                    const mined=vocab.some(v=>v.type==="word"&&v.text.toLowerCase()===clean(tok).toLowerCase());
+                    const cls="w"+(mined?" mined":"")+(anchor&&anchor.li===li&&anchor.wi===wi?" anchor":"")+(pulse===k?" pulse":"");
+                    return <React.Fragment key={wi}><span className={cls} onClick={()=>onWord(li,wi,tok)}>{tok}</span>{" "}</React.Fragment>;
+                  })}
+                  <span className="bm" title="문장 저장" onClick={()=>addVocab("sentence",l.text,li)}>🔖</span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card panel">
+          <div className="tabs">
+            <div className={tab==="vocab"?"on":""} onClick={()=>setTab("vocab")}>어휘<span className="cnt">{vocab.length}</span></div>
+            <div className={tab==="bookmark"?"on":""} onClick={()=>setTab("bookmark")}>책갈피<span className="cnt">{marks.length}</span></div>
+          </div>
+          {tab==="vocab" ? (
+            <div className="list">
+              {vocab.length===0 && <div className="empty">대본의 단어를 탭하면<br/>문장·기능태그와 함께 쌓입니다</div>}
+              {vocab.map(it=><VocabCard key={it.id} it={it} onSeek={seek} onRemove={id=>setVocab(v=>v.filter(x=>x.id!==id))} onTag={setTag}/>)}
+            </div>
+          ) : (
+            <div className="list">
+              {marks.length===0 && <div className="empty">🔖 책갈피를 누르면<br/>그 구간이 여기 저장돼요</div>}
+              {marks.map(m=>(
+                <div className="item" key={m.id}>
+                  <span className="x" onClick={()=>setMarks(v=>v.filter(x=>x.id!==m.id))}>✕</span>
+                  <div className="hd"><span className="ts2" onClick={()=>playSeg(m.start,m.end)}>▶ {fmt(m.start)}–{fmt(m.end)}</span></div>
+                  <div className="ctx">{m.label}</div>
+                  <input style={{width:"100%",fontSize:"11px",border:"1px solid var(--border)",borderRadius:"6px",padding:"4px 7px",fontFamily:"inherit",color:"var(--text)",background:"#fff"}}
+                    placeholder="메모 (예: th 발음, 못 알아들음)" value={m.note}
+                    onChange={e=>setMarks(v=>v.map(x=>x.id===m.id?{...x,note:e.target.value}:x))}/>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="foot">
+            <div className="row"><span>이 클립 저장 {vocab.length}</span><span>책갈피 {marks.length}</span></div>
+            <button className="review" onClick={()=>onReview(cur())}>
+              ▶ 이 클립 복습{vocab.length>0?" · "+vocab.length+"개":""}</button>
+            <div className="note-mock">닫으면 이 클립에 저장돼 라이브러리에서 이어집니다</div>
+          </div>
+        </div>
+      </div>
+      <div className={"toast"+(toast?" show":"")}>{toast}</div>
+    </div>
+  );
+}
+
+function ReviewMode({cards,sourceLabel,onExit}){
+  const [queue,setQueue]=useState(()=>cards.map(c=>c.id));
+  const [pos,setPos]=useState(0);
+  const [revealed,setRevealed]=useState(false);
+  const [done,setDone]=useState(0);
+  const total=cards.length;
+  const byId=id=>cards.find(c=>c.id===id);
+  const cur=pos<queue.length?byId(queue[pos]):null;
+  const [t,setT]=useState(null);
+  const [playing,setPlaying]=useState(false);
+  const segEnd=useRef(null);
+  const playerRef=useRef(null);
+  const ytBoxRef=useRef(null);
+
+  // 현재 카드 구간(ts ~ ts+5초)을 실제 영상으로 로드·재생 (videoId 없으면 무음)
+  const loadSeg=()=>{ const p=playerRef.current; if(!p||!cur) return;
+    segEnd.current=cur.ts+5; setT(cur.ts);
+    try{ if(cur.videoId) p.loadVideoById({videoId:cur.videoId, startSeconds:cur.ts}); }catch(e){}
+    /* playing 은 onStateChange 가 실제 재생 상태로 설정 (자동재생 차단 대비) */ };
+
+  // 숨긴 YouTube 플레이어 1회 생성 (오디오만 — 정답 전엔 영상이 안 보이게)
+  useEffect(()=>{
+    let dead=false;
+    loadYouTubeAPI().then(YT=>{
+      if(dead||!ytBoxRef.current) return;
+      const host=document.createElement("div"); ytBoxRef.current.appendChild(host);
+      playerRef.current=new YT.Player(host,{ width:"320", height:"180",
+        playerVars:{rel:0, modestbranding:1, playsinline:1, controls:0},
+        events:{
+          onReady:()=>loadSeg(),
+          onStateChange:e=>{ const S=window.YT.PlayerState;
+            if(e.data===S.PLAYING) setPlaying(true);
+            else if(e.data===S.PAUSED||e.data===S.ENDED||e.data===S.CUED) setPlaying(false);
+          },
+        } });
+    });
+    return ()=>{ dead=true; try{ playerRef.current && playerRef.current.destroy(); }catch(e){} playerRef.current=null; if(ytBoxRef.current) ytBoxRef.current.innerHTML=""; };
+  },[]);
+
+  // 카드가 바뀌면 그 구간을 로드
+  useEffect(()=>{ loadSeg(); },[pos,queue]);
+
+  // 재생 중에는 현재시간 폴링 → ts+5초에서 정지
+  useEffect(()=>{ if(!playing) return;
+    const iv=setInterval(()=>{ const p=playerRef.current; if(!p||!p.getCurrentTime) return;
+      let nv; try{ nv=p.getCurrentTime(); }catch(e){ return; }
+      if(nv>=segEnd.current){ try{p.pauseVideo();}catch(e){} setPlaying(false); setT(segEnd.current); return; }
+      setT(nv); },200);
+    return ()=>clearInterval(iv); },[playing,pos]);
+
+  const replay=()=>{ const p=playerRef.current;
+    if(p&&cur){ try{ p.seekTo(cur.ts,true); p.playVideo(); }catch(e){} }
+    setT(cur.ts); };
+
+  if(total===0) return (
+    <div className="app"><div className="rv-top"><span className="close" onClick={onExit}>← 돌아가기</span></div>
+      <div className="rv-empty">복습할 카드가 없어요.<br/>대본에서 단어·구문을 먼저 저장해 보세요.</div></div>
+  );
+  if(!cur) return (
+    <div className="app"><div className="rv-top"><span className="close" onClick={onExit}>← 돌아가기</span></div>
+      <div className="rv-done"><div className="big">🎉</div><h3>복습 완료</h3>
+        <p>{total}개 카드를 모두 마쳤어요</p>
+        <button className="rv-show" onClick={onExit}>돌아가기</button></div></div>
+  );
+  const rate=g=>{ setRevealed(false);
+    if(g==="good"){ setDone(d=>d+1); setPos(p=>p+1); }
+    else if(g==="soso"){ setQueue(q=>{const nq=[...q];nq.splice(pos+2,0,nq[pos]);return nq;}); setPos(p=>p+1); }
+    else{ setQueue(q=>{const nq=[...q];nq.push(nq[pos]);return nq;}); setPos(p=>p+1); }
+  };
+  return (
+    <div className="app">
+      <div ref={ytBoxRef} style={{position:"fixed",left:0,bottom:0,width:320,height:180,opacity:0,pointerEvents:"none"}}></div>
+      <div className="rv-top">
+        <span className="close" onClick={onExit}>← 돌아가기</span>
+        <div className="rv-bar"><i style={{width:(done/total*100)+"%"}}></i></div>
+        <span className="rv-bar-txt">{done} / {total}</span>
+      </div>
+      {sourceLabel && <div className="rv-src">복습 중: {sourceLabel}</div>}
+      <div className="rv-card">
+        {!revealed ? <>
+          <button className="rv-play" onClick={()=>{ if(playing){ try{playerRef.current&&playerRef.current.pauseVideo();}catch(e){} setPlaying(false); } else replay(); }}>{playing?"❚❚":"▶"}</button>
+          <div className="rv-seg">{fmt(t==null?cur.ts:t)} · 원본 구간 듣기</div>
+          <div className="rv-q">뭐라고 했을까요? 떠올려 보세요</div>
+          <button className="rv-show" onClick={()=>setRevealed(true)}>정답 보기</button>
+        </> : <>
+          <div className="rv-hw">{cur.text}</div>
+          {cur.tag && <span className={"badge rv-badge "+(cur.type==="word"?"b-word":cur.type==="phrase"?"b-phrase":"b-sent")}>#{cur.tag}</span>}
+          {cur.ko && <div className="rv-ko">{cur.ko}</div>}
+          {cur.en && <div className="rv-en">{cur.en}</div>}
+          <div className="rv-ctx">{(()=>{const lo=cur.sentence.toLowerCase(),tl=cur.text.toLowerCase(),i=lo.indexOf(tl);
+            return i<0?cur.sentence:<>{cur.sentence.slice(0,i)}<mark>{cur.sentence.slice(i,i+cur.text.length)}</mark>{cur.sentence.slice(i+cur.text.length)}</>;})()}</div>
+          <button className="rv-replay" onClick={replay}>↻ 원본 구간 다시 듣기</button>
+          <div className="rv-rate">
+            <button className="rv-again" onClick={()=>rate("again")}>다시</button>
+            <button className="rv-soso" onClick={()=>rate("soso")}>애매</button>
+            <button className="rv-good" onClick={()=>rate("good")}>알아</button>
+          </div>
+        </>}
+      </div>
+    </div>
+  );
+}
+
+function Search({existingIds,onAdd,onImport,onNav}){
+  const [minM,setMinM]=useState(0);
+  const [maxM,setMaxM]=useState(120);
+  const [lvl,setLvl]=useState(2);
+  const [topics,setTopics]=useState([]);
+  const [allTopics,setAllTopics]=useState(["여행","과학","일상","심리","자연·환경","요리"]);
+  const [adding,setAdding]=useState(false);
+  const [newTopic,setNewTopic]=useState("");
+  const [results,setResults]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [addingId,setAddingId]=useState(null);
+  const [importUrl,setImportUrl]=useState("");
+  const [importing,setImporting]=useState(false);
+  // 필터 바뀔 때마다 비동기 검색
+  useEffect(()=>{
+    let alive=true; setLoading(true);
+    searchVideos({minSec:minM*60,maxSec:maxM*60,level:lvl,topics}).then(r=>{ if(alive){ setResults(r); setLoading(false); } });
+    return ()=>{ alive=false; };
+  },[minM,maxM,lvl,topics]);
+
+  const toggle=t=>setTopics(ts=>ts.includes(t)?ts.filter(x=>x!==t):[...ts,t]);
+  const setMin=v=>setMinM(Math.min(v,maxM));
+  const setMax=v=>setMaxM(Math.max(v,minM));
+  const addTopic=()=>{ const t=newTopic.trim();
+    if(t && !allTopics.includes(t)){ setAllTopics(a=>[...a,t]); setTopics(ts=>[...ts,t]); }
+    setNewTopic(""); setAdding(false); };
+  const add=async r=>{ setAddingId(r.id); await onAdd(r); /* 화면 전환됨 */ };
+  const doImport=async()=>{ const u=importUrl.trim(); if(!u||importing)return; setImporting(true); await onImport(u); setImporting(false); setImportUrl(""); };
+
+  return (
+    <div className="app">
+      <Top screen="search" onNav={onNav}/>
+      <div className="lib-head"><h2>콘텐츠 검색</h2><span className="sub">{loading?"검색 중…":"결과 "+results.length+"개"}</span></div>
+      <div className="sbar" style={{display:"flex",gap:"8px",alignItems:"center"}}>
+        <span className="flab" style={{minWidth:"auto"}}>링크로 추가</span>
+        <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&doImport()}
+          placeholder="YouTube 링크 또는 영상 ID 붙여넣기"
+          style={{flex:1,minWidth:0,height:"32px",fontSize:"12px",border:"1px solid var(--border2)",borderRadius:"8px",padding:"0 10px",fontFamily:"inherit",color:"var(--text)",background:"#fff"}}/>
+        <span className={"addbtn"+(importing?" busy":"")} onClick={doImport}>{importing?"가져오는 중…":"가져오기"}</span>
+      </div>
+      <div className="sbar">
+        <div className="frow">
+          <span className="flab">길이</span>
+          <div className="range">
+            <input type="range" min="0" max="180" step="1" value={minM} onChange={e=>setMin(+e.target.value)}/>
+            <input type="range" min="0" max="180" step="1" value={maxM} onChange={e=>setMax(+e.target.value)}/>
+            <span className="rdo">{minM}–{maxM}분</span>
+          </div>
+        </div>
+        <div className="frow">
+          <span className="flab">난이도</span>
+          <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+            {LEVEL_KO.map((t,i)=><span key={t} className={"chip"+(lvl===i?" on":"")} onClick={()=>setLvl(i)}>{t}</span>)}
+          </div>
+        </div>
+        <div className="frow">
+          <span className="flab">주제</span>
+          <div style={{display:"flex",gap:"6px",flexWrap:"wrap",alignItems:"center"}}>
+            {allTopics.map(t=><span key={t} className={"chip"+(topics.includes(t)?" on":"")} onClick={()=>toggle(t)}>{t}</span>)}
+            {adding
+              ? <input autoFocus placeholder="주제 입력"
+                  style={{width:"110px",height:"30px",fontSize:"12px",border:"1px solid var(--info-bd)",borderRadius:"8px",padding:"0 8px",fontFamily:"inherit"}}
+                  value={newTopic} onChange={e=>setNewTopic(e.target.value)} onBlur={addTopic}
+                  onKeyDown={e=>e.key==="Enter"&&addTopic()}/>
+              : <span className="chip" style={{borderStyle:"dashed",color:"var(--muted)"}} onClick={()=>setAdding(true)}>+ 직접 추가</span>}
+          </div>
+        </div>
+      </div>
+      {loading
+        ? <div className="nores">검색 중…</div>
+        : results.length===0
+          ? <div className="nores">조건에 맞는 콘텐츠가 없어요. 필터를 넓혀 보세요.</div>
+          : <div className="grid">
+              {results.map(r=>{
+                const added=existingIds.includes(r.id);
+                const busy=addingId===r.id;
+                return (
+                  <div className="clipcard" key={r.id} style={{cursor:"default"}}>
+                    <div className="thumb"><span className="lvl">{r.level}</span><span className="ic">▶</span><span className="dur">{fmt(r.total)}</span></div>
+                    <div className="body">
+                      <div className="ttl">{r.title}</div>
+                      <div className="tags">{r.topics.map(t=><span className="t" key={t}>{t}</span>)}</div>
+                      <div className="meta" style={{justifyContent:"space-between"}}>
+                        <span className="resmeta">{r.channel}</span>
+                        <span className={"addbtn"+(added?" added":busy?" busy":"")}
+                          onClick={()=>!added&&!busy&&add(r)}>{added?"추가됨":busy?"불러오는 중…":"+ 추가"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>}
+      <div className="note-mock" style={{marginTop:"16px"}}>
+        {USE_BACKEND?"백엔드 연동됨":"mock 모드 — searchVideos()·fetchTranscript() 가 백엔드 호출로 교체될 자리"}
+      </div>
+    </div>
+  );
+}
+
+function BrowseCard({it,onOpenAt}){
+  const [open,setOpen]=useState(false);
+  const lo=it.sentence.toLowerCase(), tl=it.text.toLowerCase(), i=lo.indexOf(tl);
+  const ctx=i<0?it.sentence:<>{it.sentence.slice(0,i)}<mark>{it.sentence.slice(i,i+it.text.length)}</mark>{it.sentence.slice(i+it.text.length)}</>;
+  return (
+    <div className="item">
+      <div className="hd">
+        <span className="hw">{it.text}</span>
+        <span className={"badge "+(it.type==="word"?"b-word":it.type==="phrase"?"b-phrase":"b-sent")}>
+          {it.type==="word"?"단어":it.type==="phrase"?"구문":"문장"}</span>
+        {it.tag && <span className="tag" style={{cursor:"default"}}>#{it.tag}</span>}
+      </div>
+      {it.type!=="sentence" && <div className="ctx">{ctx}</div>}
+      <div className="metarow">
+        <span className="resmeta" style={{cursor:"pointer",color:"var(--info)"}} title="원본에서 듣기"
+          onClick={()=>onOpenAt(it.clipId,it.ts)}>▷ {it.clipTitle} · {fmt(it.ts)}</span>
+        <span className="reveal" onClick={()=>setOpen(o=>!o)}>{open?"뜻 숨기기":"뜻 보기"}</span>
+      </div>
+      {open && <div className="meaning">
+        {it.ko?<><div className="ko">{it.ko}</div>{it.en&&<div className="en">{it.en}</div>}</>:<div className="ph">뜻 없음</div>}
+      </div>}
+    </div>
+  );
+}
+
+function Browse({clips,onNav,onOpenAt}){
+  const items=clips.flatMap(c=>c.vocab.map(v=>({...v,clipTitle:c.title,clipId:c.id})));
+  const [sel,setSel]=useState(null);
+  const counts={}; items.forEach(v=>{ const k=v.tag||""; counts[k]=(counts[k]||0)+1; });
+  const filtered = sel==null ? items : items.filter(v=>(v.tag||"")===sel);
+  const hasUntagged=(counts[""]||0)>0;
+  return (
+    <div className="app">
+      <Top screen="browse" onNav={onNav}/>
+      <div className="lib-head"><h2>기능별 모아보기</h2><span className="sub">표현 {items.length}개</span></div>
+      {items.length===0
+        ? <div className="nores">아직 모은 표현이 없어요.<br/>대본에서 단어·구문을 저장하면 여기에 기능별로 쌓입니다.</div>
+        : <>
+          <div className="sbar">
+            <div className="frow">
+              <span className="flab">필터</span>
+              <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+                <span className={"chip"+(sel==null?" on":"")} onClick={()=>setSel(null)}>전체 {items.length}</span>
+                {hasUntagged && <span className={"chip"+(sel===""?" on":"")} onClick={()=>setSel("")}>태그 없음 {counts[""]}</span>}
+              </div>
+            </div>
+            {FUNCTION_TAGS.map(g=>{
+              const ts=g.tags.filter(t=>counts[t]);
+              if(!ts.length) return null;
+              return (
+                <div className="frow" key={g.group}>
+                  <span className="flab">{g.group}</span>
+                  <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+                    {ts.map(t=><span key={t} className={"chip"+(sel===t?" on":"")} onClick={()=>setSel(t)}>#{t} {counts[t]}</span>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+            {filtered.map(it=><BrowseCard key={it.clipId+":"+it.id} it={it} onOpenAt={onOpenAt}/>)}
+          </div>
+        </>}
+    </div>
+  );
+}
+
+function App(){
+  const [clips,setClips]=useState(seedClips);
+  const [screen,setScreen]=useState("library");
+  const [openId,setOpenId]=useState(null);
+  const [openSeek,setOpenSeek]=useState(null);
+  const [review,setReview]=useState(null);
+
+  const persist=u=>setClips(cs=>cs.map(c=>c.id===u.id?u:c));
+  const removeClip=id=>setClips(cs=>cs.filter(c=>c.id!==id));
+  const openClip=id=>{ setOpenSeek(null); setOpenId(id); setScreen("study"); };
+  const openClipAt=(id,ts)=>{ setOpenSeek(ts); setOpenId(id); setScreen("study"); };
+  const closeClip=u=>{ persist(u); setOpenId(null); setScreen("library"); };
+  const reviewClip=u=>{ persist(u); setReview({cards:u.vocab.map(c=>({...c,videoId:u.id})),label:u.title,back:"study"}); setScreen("review"); };
+  const reviewAll=()=>{ const all=clips.flatMap(c=>c.vocab.map(v=>({...v,videoId:c.id}))); setReview({cards:all,label:"전체 라이브러리 ("+all.length+"개)",back:"library"}); setScreen("review"); };
+  const exitReview=()=>{ setScreen(review&&review.back==="study"&&openId?"study":"library"); setReview(null); };
+
+  // 검색 결과 추가: 대본을 비동기로 가져온 뒤 클립 생성 → 학습으로
+  const addFromSearch=async r=>{
+    const tx=await fetchTranscript(r.id);
+    const clip={id:r.id,title:r.title,channel:r.channel,level:r.level,topics:r.topics,
+      transcript:tx,total:r.total,pos:0,plays:0,vocab:[],marks:[]};
+    setClips(cs=>cs.some(c=>c.id===clip.id)?cs:[...cs,clip]);
+    setOpenSeek(null); setOpenId(clip.id); setScreen("study");
+  };
+
+  // URL/ID 로 직접 가져오기 → 메타 조회 후 기존 추가 흐름 재사용
+  const importFromUrl=async url=>{
+    const r=await importVideo(url);
+    if(r&&r.id) await addFromSearch(r);
+    else window.alert("영상을 가져오지 못했어요. YouTube 링크 또는 영상 ID를 확인해 주세요.");
+  };
+
+  const navTop=s=>{ if(s==="search")setScreen("search"); else if(s==="library")setScreen("library");
+    else if(s==="browse")setScreen("browse"); else if(s==="review")reviewAll();
+    else if(s==="study"&&openId)setScreen("study"); };
+
+  if(screen==="search") return <Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop}/>;
+  if(screen==="browse") return <Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
+  if(screen==="review") return <ReviewMode cards={review.cards} sourceLabel={review.label} onExit={exitReview}/>;
+  if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
+    return <Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
+      onNav={(s,upd)=>{ if(s==="study")return; persist(upd);
+        if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
+        else if(s==="review")reviewClip(upd); else { setOpenId(null); setScreen("library"); } }}/>; }
+  return <Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
