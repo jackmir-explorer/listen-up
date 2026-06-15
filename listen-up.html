@@ -176,6 +176,31 @@
   .addbtn.added,.addbtn.busy{background:var(--bg);border-color:var(--border);color:var(--hint);cursor:default;}
   .resmeta{font-size:10.5px;color:var(--hint);}
   .nores{text-align:center;color:var(--hint);font-size:13px;padding:36px 20px;}
+  /* Gist 동기화 위젯 */
+  .sync-fab{position:fixed;right:14px;bottom:14px;z-index:50;display:flex;align-items:center;gap:6px;
+    padding:7px 11px;border-radius:999px;border:1px solid var(--border2);background:var(--surface);
+    color:var(--text);font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+  .sync-dot{width:8px;height:8px;border-radius:50%;background:#b9b7af;display:inline-block;}
+  .sync-dot.s-ok{background:#3a9d5d;} .sync-dot.s-error{background:#cf4b4b;}
+  .sync-dot.s-syncing,.sync-dot.s-dirty{background:#d99a2b;}
+  .sync-msg{font-size:11px;color:var(--muted);}
+  .sync-modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.32);display:flex;
+    align-items:center;justify-content:center;padding:18px;}
+  .sync-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    width:100%;max-width:360px;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.2);}
+  .sync-h{font-weight:700;font-size:15px;display:flex;align-items:center;}
+  .sync-h .x{margin-left:auto;cursor:pointer;color:var(--muted);}
+  .sync-p{font-size:13px;color:var(--text);line-height:1.6;margin:12px 0;}
+  .sync-p code{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:12px;}
+  .sync-in{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border2);
+    border-radius:9px;font-size:13px;margin-bottom:10px;background:var(--bg);color:var(--text);}
+  .sync-row{display:flex;gap:8px;}
+  .sync-btn{flex:1;padding:9px 12px;border-radius:9px;border:1px solid var(--border2);
+    background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;margin-top:8px;}
+  .sync-btn.primary{background:var(--info);border-color:var(--info);color:#fff;width:100%;}
+  .sync-btn.danger{color:#cf4b4b;border-color:#e3c2c2;width:100%;}
+  .sync-link{display:inline-block;margin-top:10px;font-size:12px;color:var(--info);text-decoration:none;}
+  .sync-note{font-size:11px;color:var(--hint);margin-top:12px;line-height:1.5;}
 </style>
 </head>
 <body>
@@ -993,7 +1018,7 @@ function Browse({clips,onNav,onOpenAt}){
 }
 
 /* ── 로컬 영속화: 라이브러리(clips)를 localStorage 에 저장·복원 ──
-   study-app 방식(단일 파일 + localStorage). 다음 단계에서 Gist 동기화로 기기 간 백업 확장 예정. */
+   study-app 방식(단일 파일 + localStorage). 기기 간 백업은 아래 Gist 동기화로 확장됨. */
 const STORE_KEY = "listen-up.library.v1";
 function loadClips(){
   try{
@@ -1007,14 +1032,166 @@ function saveClips(clips){
   catch(e){ console.error("library save 실패:", e); }
 }
 
+/* ── GitHub Gist 동기화 (study-app 방식: localStorage ↔ 비공개 Gist) ──
+   토큰 'gist_token'(gist 스코프 PAT) + 'gist_id'. 라이브러리 전체를
+   {updatedAt, clips} 한 덩어리로 비공개 Gist 에 PATCH/POST. last-write-wins. */
+const GIST_FILE = "listen-up_sync.json";
+const TS_KEY    = "listen-up.updatedAt";
+let   GIST_TOKEN = localStorage.getItem("gist_token") || "";
+let   GIST_ID    = localStorage.getItem("gist_id")    || "";
+
+function gistConnected(){ return !!GIST_TOKEN; }
+function gistHeaders(){
+  return { "Authorization":"token "+GIST_TOKEN,
+           "Accept":"application/vnd.github+json",
+           "Content-Type":"application/json" };
+}
+function setGistToken(t){ GIST_TOKEN=(t||"").trim();
+  if(GIST_TOKEN) localStorage.setItem("gist_token",GIST_TOKEN); else localStorage.removeItem("gist_token"); }
+function setGistId(id){ GIST_ID=id||"";
+  if(GIST_ID) localStorage.setItem("gist_id",GIST_ID); else localStorage.removeItem("gist_id"); }
+function localTS(){ return Number(localStorage.getItem(TS_KEY)||0); }
+
+// 라이브러리를 Gist 로 올림(없으면 비공개 Gist 생성). 성공 시 updatedAt 반환.
+async function gistPush(clips){
+  if(!GIST_TOKEN) throw new Error("토큰이 없습니다");
+  const updatedAt = Date.now();
+  const file = { content: JSON.stringify({ updatedAt, clips }) };
+  if(!GIST_ID){
+    const res=await fetch("https://api.github.com/gists",{ method:"POST", headers:gistHeaders(),
+      body:JSON.stringify({ description:"Listen-up sync", public:false, files:{ [GIST_FILE]:file } }) });
+    if(!res.ok) throw new Error("Gist 생성 실패 ("+res.status+")");
+    setGistId((await res.json()).id);
+  }else{
+    const res=await fetch("https://api.github.com/gists/"+GIST_ID,{ method:"PATCH", headers:gistHeaders(),
+      body:JSON.stringify({ files:{ [GIST_FILE]:file } }) });
+    if(res.status===404){ setGistId(""); return gistPush(clips); } // 삭제된 gist → 재생성
+    if(!res.ok) throw new Error("Gist 저장 실패 ("+res.status+")");
+  }
+  localStorage.setItem(TS_KEY,String(updatedAt));
+  return updatedAt;
+}
+
+// Gist 에서 라이브러리 가져오기 → {updatedAt, clips} 또는 null.
+async function gistPull(){
+  if(!GIST_TOKEN || !GIST_ID) return null;
+  const res=await fetch("https://api.github.com/gists/"+GIST_ID,{ headers:gistHeaders() });
+  if(res.status===404){ setGistId(""); return null; }
+  if(!res.ok) throw new Error("Gist 불러오기 실패 ("+res.status+")");
+  const j=await res.json();
+  const f=j.files && j.files[GIST_FILE];
+  if(!f || !f.content) return null;
+  let content=f.content;
+  if(f.truncated && f.raw_url){ content=await (await fetch(f.raw_url,{headers:gistHeaders()})).text(); }
+  const data=JSON.parse(content);
+  return Array.isArray(data.clips) ? { updatedAt:Number(data.updatedAt)||0, clips:data.clips } : null;
+}
+
+/* 화면 위 떠 있는 동기화 버튼 + 설정 모달 (모든 화면 공통) */
+function SyncWidget({sync,open,setOpen,onConnect,onDisconnect,onPush,onPull}){
+  const [token,setToken]=useState("");
+  const connected=gistConnected();
+  return (<>
+    <button className="sync-fab" title="기기 간 동기화(Gist)" onClick={()=>setOpen(o=>!o)}>
+      <span className={"sync-dot s-"+(sync.state||"idle")}></span>☁
+      {sync.msg ? <span className="sync-msg">{sync.msg}</span> : null}
+    </button>
+    {open && (
+      <div className="sync-modal" onClick={()=>setOpen(false)}>
+        <div className="sync-card" onClick={e=>e.stopPropagation()}>
+          <div className="sync-h">☁ 기기 간 동기화<span className="x" onClick={()=>setOpen(false)}>✕</span></div>
+          {!connected ? <>
+            <p className="sync-p">GitHub <b>Personal Access Token</b>(classic, <code>gist</code> 권한)을 넣으면 라이브러리가 <b>비공개 Gist</b> 에 백업되고 다른 기기와 동기화됩니다.</p>
+            <input className="sync-in" type="password" placeholder="ghp_… 토큰 붙여넣기"
+              value={token} onChange={e=>setToken(e.target.value)}/>
+            <button className="sync-btn primary" onClick={()=>onConnect(token.trim())}>연결</button>
+            <a className="sync-link" href="https://github.com/settings/tokens/new?scopes=gist&description=listen-up"
+              target="_blank" rel="noreferrer">토큰 발급하기 →</a>
+          </> : <>
+            <p className="sync-p">상태: <b>{sync.msg||"연결됨"}</b></p>
+            <div className="sync-row">
+              <button className="sync-btn" onClick={onPush}>지금 올리기 ↑</button>
+              <button className="sync-btn" onClick={onPull}>지금 내려받기 ↓</button>
+            </div>
+            {GIST_ID && <a className="sync-link" href={"https://gist.github.com/"+GIST_ID}
+              target="_blank" rel="noreferrer">Gist 열기 →</a>}
+            <button className="sync-btn danger" onClick={onDisconnect}>연결 해제</button>
+          </>}
+          <p className="sync-note">토큰은 이 기기 브라우저(localStorage)에만 저장됩니다. 공용 PC 에선 사용 후 연결을 해제하세요.</p>
+        </div>
+      </div>
+    )}
+  </>);
+}
+
 function App(){
   const [clips,setClips]=useState(loadClips);
   const [screen,setScreen]=useState("library");
   const [openId,setOpenId]=useState(null);
   const [openSeek,setOpenSeek]=useState(null);
   const [review,setReview]=useState(null);
+  const [sync,setSync]=useState({state: gistConnected()?"syncing":"idle", msg:""});
+  const [syncOpen,setSyncOpen]=useState(false);
+  const clipsRef=useRef(clips); clipsRef.current=clips;
+  const syncedOnce=useRef(false);
+  const skipPush=useRef(false);
+  const pushTimer=useRef(null);
 
-  useEffect(()=>{ saveClips(clips); },[clips]);   // 변경 시마다 자동 저장
+  useEffect(()=>{ saveClips(clips); },[clips]);   // 변경 시마다 로컬 저장
+
+  // 마운트 시 1회: Gist 와 초기 동기화 (원격이 더 새것이면 내려받고, 아니면 백업)
+  useEffect(()=>{
+    if(!gistConnected()) return;
+    (async()=>{
+      setSync({state:"syncing",msg:"동기화 중…"});
+      try{
+        const remote=await gistPull();
+        if(remote && remote.updatedAt>localTS()){
+          skipPush.current=true; setClips(remote.clips); saveClips(remote.clips);
+          localStorage.setItem(TS_KEY,String(remote.updatedAt));
+          setSync({state:"ok",msg:"내려받음"});
+        }else{
+          await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"});
+        }
+      }catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
+      finally{ syncedOnce.current=true; }
+    })();
+  },[]);
+
+  // 변경 시 디바운스(2.5s) 푸시 — 초기 동기화 후에만, 방금 내려받은 건 제외
+  useEffect(()=>{
+    if(!syncedOnce.current) return;
+    if(skipPush.current){ skipPush.current=false; return; }
+    if(!gistConnected()) return;
+    clearTimeout(pushTimer.current);
+    setSync(s=>s.state==="syncing"?s:{state:"dirty",msg:"변경됨"});
+    pushTimer.current=setTimeout(async()=>{
+      setSync({state:"syncing",msg:"저장 중…"});
+      try{ await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+      catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
+    },2500);
+  },[clips]);
+
+  const pushNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"저장 중…"});
+    try{ await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+    catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const pullNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"불러오는 중…"});
+    try{ const r=await gistPull();
+      if(r){ skipPush.current=true; setClips(r.clips); saveClips(r.clips);
+        localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
+      else setSync({state:"ok",msg:"원격 비어있음"}); }
+    catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const connectGist=async(t)=>{ setSyncOpen(false); setGistToken(t);
+    if(!t){ setSync({state:"idle",msg:""}); return; }
+    setSync({state:"syncing",msg:"연결 중…"});
+    try{ const r=await gistPull();
+      if(r && r.updatedAt>localTS()){ skipPush.current=true; setClips(r.clips); saveClips(r.clips);
+        localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
+      else { await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+      syncedOnce.current=true;
+    }catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const disconnectGist=()=>{ setGistToken(""); setGistId(""); localStorage.removeItem(TS_KEY);
+    syncedOnce.current=false; setSync({state:"idle",msg:""}); setSyncOpen(false); };
 
   const persist=u=>setClips(cs=>cs.map(c=>c.id===u.id?u:c));
   const removeClip=id=>setClips(cs=>cs.filter(c=>c.id!==id));
@@ -1045,15 +1222,20 @@ function App(){
     else if(s==="browse")setScreen("browse"); else if(s==="review")reviewAll();
     else if(s==="study"&&openId)setScreen("study"); };
 
-  if(screen==="search") return <Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop}/>;
-  if(screen==="browse") return <Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
-  if(screen==="review") return <ReviewMode cards={review.cards} sourceLabel={review.label} onExit={exitReview}/>;
-  if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
-    return <Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
+  let view;
+  if(screen==="search") view=<Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop}/>;
+  else if(screen==="browse") view=<Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
+  else if(screen==="review") view=<ReviewMode cards={review.cards} sourceLabel={review.label} onExit={exitReview}/>;
+  else if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
+    view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
       onNav={(s,upd)=>{ if(s==="study")return; persist(upd);
         if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
         else if(s==="review")reviewClip(upd); else { setOpenId(null); setScreen("library"); } }}/>; }
-  return <Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
+  else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
+  return <>{view}
+    <SyncWidget sync={sync} open={syncOpen} setOpen={setSyncOpen}
+      onConnect={connectGist} onDisconnect={disconnectGist} onPush={pushNow} onPull={pullNow}/>
+  </>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>

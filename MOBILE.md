@@ -1,9 +1,10 @@
 # Listen-up — 모바일/배포 (study-app 방식)
 
-`study-app` 에서 쓰던 방식 그대로 listen-up 에 적용한 1단계 셋업입니다.
+`study-app` 에서 쓰던 방식 그대로 listen-up 에 적용한 셋업입니다 (1·2단계 반영).
 
 - **단일 파일** `listen-up.html` 이 소스의 진실 (CSS/JS 통합) — 이미 그렇습니다.
-- **localStorage 영속화** — 라이브러리(클립·저장한 표현·책갈피)가 브라우저에 저장돼 새로고침/재실행에도 유지됩니다. *(다음 단계: GitHub Gist 동기화로 기기 간 백업)*
+- **localStorage 영속화** — 라이브러리(클립·저장한 표현·책갈피)가 브라우저에 저장돼 새로고침/재실행에도 유지됩니다.
+- **GitHub Gist 동기화** — 우하단 ☁ 버튼에서 토큰을 연결하면 라이브러리가 비공개 Gist 에 백업되고 다른 기기와 동기화됩니다. (아래 "기기 간 동기화" 참고)
 - **Capacitor 네이티브 래핑** — 같은 HTML 을 안드로이드 앱으로 패키징. `isNativeApp()` 으로 웹/네이티브 분기.
 - **GitHub Pages 배포** — `deploy.sh` 가 `gh-pages` 브랜치로 푸시.
 - **백엔드는 따로 호스팅** — listen-up 은 study-app 과 달리 서버(Anthropic·YouTube)가 필요. `API_BASE` 를 설정값으로 빼서 호스팅한 주소를 주입합니다.
@@ -62,10 +63,20 @@ LISTENUP_API_BASE="https://listen-up-api.onrender.com" npm run cap:sync
 2. `localStorage["listen-up.apiBase"]` — 앱 안에서 런타임 변경
 3. 기본값 — 서버가 직접 서빙하면 같은 출처(`""`), `file://`·네이티브면 개발용 `http://localhost:3001`
 
+## 기기 간 동기화 (GitHub Gist)
+study-app 방식: 라이브러리 전체(`{updatedAt, clips}`)를 **비공개 Gist** 한 파일(`listen-up_sync.json`)에 백업하고, 여러 기기에서 같은 Gist 를 공유합니다.
+
+1. 앱 우하단 **☁ 버튼** → **토큰 발급하기** (GitHub classic PAT, `gist` 권한만)
+2. 토큰을 붙여넣고 **연결** → 자동으로 비공개 Gist 생성/연결, 초기 동기화
+3. 이후 변경은 2.5초 디바운스로 자동 백업. 다른 기기에선 연결 시 더 최신본을 자동으로 내려받음(last-write-wins). **지금 올리기/내려받기**로 수동 동기화도 가능.
+
+- 키 저장: `gist_token`·`gist_id` (해당 기기 localStorage 에만). 공용 PC 에선 **연결 해제** 권장.
+- 토큰은 서버를 안 거치고 브라우저에서 직접 `api.github.com/gists` 만 호출합니다.
+
 ## 개발 컨벤션 (study-app 과 동일)
 - **외과적 수정** — 전체 재작성 금지, 정확한 위치만 최소 변경.
 - **변경 후 commit + push** — 여러 기기에 같은 배포본을 제공하므로.
 
 ## 현재 한계 / 다음 단계
-- 데이터는 기기 로컬(localStorage)에만 저장 → **2단계: GitHub Gist 동기화**로 기기 간 백업 예정.
+- Gist 동기화는 **라이브러리 전체 단위 last-write-wins** — 두 기기에서 동시에 편집하면 나중 저장이 우선. 학습 1인 사용엔 충분하나, 동시 편집 병합은 아직 없음.
 - 자막은 비공식 추출이라 깨질 수 있음(기존 한계 동일).
