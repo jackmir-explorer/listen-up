@@ -1,0 +1,21 @@
+{
+  "name": "listen-up",
+  "version": "1.0.0",
+  "private": true,
+  "description": "영어 듣기 학습 앱 — 단일 HTML 프런트 + Capacitor 네이티브 래핑 + GitHub Pages (백엔드는 server/)",
+  "scripts": {
+    "build:www": "bash scripts/build-www.sh",
+    "cap:add:android": "npm run build:www && npx cap add android",
+    "cap:sync": "npm run build:www && npx cap sync",
+    "cap:open:android": "npx cap open android",
+    "cap:run:android": "npm run cap:sync && npx cap run android",
+    "deploy:pages": "bash deploy.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}

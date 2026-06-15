@@ -2,7 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<!-- 배포(네이티브/Pages) 빌드 시 window.LISTEN_UP_API_BASE 주입 지점 (scripts/build-www.sh) -->
+<!--__API_BASE__-->
 <title>Listening Miner</title>
 <style>
   :root{
@@ -212,7 +214,24 @@ const FUNCTION_TAGS=[
    API LAYER  ←★ 백엔드 연동은 여기만 수정
    ════════════════════════════════════════════════════════ */
 const USE_BACKEND = true;                   // ←★ 켜짐: /api/analyze 호출 (mock 끄려면 false)
-const API_BASE    = location.protocol === "file:" ? "http://localhost:3001" : ""; // 서버가 직접 서빙하면 상대경로(같은 출처); file:// 로 열면 localhost
+
+// Capacitor 네이티브 앱 여부 (study-app 방식: isNativeApp() 로 웹/네이티브 분기)
+function isNativeApp(){
+  return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function"
+    && window.Capacitor.isNativePlatform());
+}
+
+// API_BASE 결정 (설정 가능):
+//   1) window.LISTEN_UP_API_BASE — 배포(네이티브/Pages) 빌드가 주입한 호스팅 서버 주소
+//   2) localStorage["listen-up.apiBase"] — 앱 내에서 런타임 변경
+//   3) 서버가 직접 서빙하면 상대경로(""); file:// 나 네이티브면 개발용 localhost
+function resolveApiBase(){
+  if(typeof window.LISTEN_UP_API_BASE === "string") return window.LISTEN_UP_API_BASE;
+  try{ const s = localStorage.getItem("listen-up.apiBase"); if(s!=null) return s; }catch(e){}
+  if(location.protocol === "file:" || isNativeApp()) return "http://localhost:3001";
+  return ""; // 서버 같은 출처(상대경로)
+}
+const API_BASE    = resolveApiBase();
 const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
 
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
@@ -973,12 +992,29 @@ function Browse({clips,onNav,onOpenAt}){
   );
 }
 
+/* ── 로컬 영속화: 라이브러리(clips)를 localStorage 에 저장·복원 ──
+   study-app 방식(단일 파일 + localStorage). 다음 단계에서 Gist 동기화로 기기 간 백업 확장 예정. */
+const STORE_KEY = "listen-up.library.v1";
+function loadClips(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return v; }
+  }catch(e){ console.error("library load 실패:", e); }
+  return seedClips();            // 저장된 게 없으면 시드(예시) 라이브러리
+}
+function saveClips(clips){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(clips)); }
+  catch(e){ console.error("library save 실패:", e); }
+}
+
 function App(){
-  const [clips,setClips]=useState(seedClips);
+  const [clips,setClips]=useState(loadClips);
   const [screen,setScreen]=useState("library");
   const [openId,setOpenId]=useState(null);
   const [openSeek,setOpenSeek]=useState(null);
   const [review,setReview]=useState(null);
+
+  useEffect(()=>{ saveClips(clips); },[clips]);   // 변경 시마다 자동 저장
 
   const persist=u=>setClips(cs=>cs.map(c=>c.id===u.id?u:c));
   const removeClip=id=>setClips(cs=>cs.filter(c=>c.id!==id));
