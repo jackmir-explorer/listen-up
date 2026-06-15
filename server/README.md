@@ -75,7 +75,12 @@ npm install
 
 > 최신 SDK를 원하면: `npm install @anthropic-ai/sdk@latest`
 
-## .env 설정
+## API 키 — 두 가지 방법
+
+- **권장: 앱에서 입력** — 서버를 키 없이 그냥 띄우고(`npm start`), 브라우저에서 앱 우하단 **⚙ 설정 → Anthropic API 키**에 `sk-ant-…` 를 붙여넣으면 끝. `.env` 를 안 만들어도 됩니다. (키는 그 기기 브라우저 localStorage 에 저장되고, 분석 요청 때 헤더로 서버에 전달)
+- **또는 .env** — 아래처럼 `server/.env` 에 키를 넣어두면 서버가 폴백으로 사용합니다(여러 사용자/자동화에 편리).
+
+## .env 설정 (선택)
 
 `server/.env.example` 을 복사해 `server/.env` 를 만들고 키를 채웁니다.
 
@@ -106,7 +111,7 @@ npm start
 성공하면 다음과 같이 출력됩니다:
 
 ```
-✔ analyze 서버 실행 중 → http://localhost:3001  (model: claude-sonnet-4-6)
+✔ 서버 실행 중 → http://localhost:3001  (model: claude-sonnet-4-6, 키는 앱 ⚙ 설정에서 입력)
 ```
 
 개발 중 자동 재시작을 원하면: `npm run dev`

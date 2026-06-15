@@ -24,28 +24,20 @@ dotenv.config({ path: path.join(__dirname, ".env") });
 const PORT = process.env.PORT || 3001;
 const MODEL = "claude-sonnet-4-6"; // 요청하신 sonnet 계열. 바꾸려면 이 한 줄만 수정.
 
-// ── 시작 전 API 키 점검 ────────────────────────────────────────────
-// 비었거나 / .env.example placeholder(한글 포함) 그대로거나 / 형식이 틀리면
-// 매 요청 502 로 헤매지 않도록 부팅 단계에서 분명하게 중단한다.
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-const keyProblem =
-  !API_KEY || !API_KEY.trim()
-    ? "server/.env 에 ANTHROPIC_API_KEY 가 비어 있습니다."
-    : /[^\x00-\x7F]/.test(API_KEY)
-    ? "ANTHROPIC_API_KEY 에 비-ASCII 문자(예: 한글)가 있습니다 — .env.example 의 placeholder 를 실제 키로 바꾸지 않은 것 같습니다."
-    : !API_KEY.startsWith("sk-ant-")
-    ? "ANTHROPIC_API_KEY 형식이 올바르지 않습니다 (실제 키는 'sk-ant-' 로 시작합니다)."
-    : null;
-if (keyProblem) {
-  console.error(
-    "✖ " + keyProblem + "\n" +
-      "  https://console.anthropic.com → API Keys 에서 발급한 키를 server/.env 에 넣으세요."
-  );
-  process.exit(1);
+// API 키는 두 곳에서 받는다:
+//   (1) 요청 헤더 x-anthropic-key — 앱 ⚙ 설정에서 입력 (권장; .env 불필요)
+//   (2) 서버 .env 의 ANTHROPIC_API_KEY — 헤더가 없을 때 폴백
+// 키가 없어도 서버는 정상 부팅하고, 분석 요청 시점에만 검사한다.
+function resolveKey(req) {
+  const h = req.header("x-anthropic-key");
+  return ((h && h.trim()) || process.env.ANTHROPIC_API_KEY || "").trim();
 }
-
-// SDK 는 기본적으로 환경변수 ANTHROPIC_API_KEY 를 읽습니다.
-const anthropic = new Anthropic();
+function keyError(key) {
+  if (!key) return "Anthropic API 키가 없습니다. 앱의 ⚙ 설정에서 키(sk-ant-…)를 입력하세요.";
+  if (/[^\x00-\x7F]/.test(key)) return "API 키에 비-ASCII 문자(예: 한글)가 섞여 있습니다.";
+  if (!key.startsWith("sk-ant-")) return "API 키 형식이 올바르지 않습니다 ('sk-ant-' 로 시작합니다).";
+  return null;
+}
 
 const app = express();
 app.use(cors()); // 로컬 개발용: 모든 출처 허용. 배포 시 origin 제한 권장.
@@ -68,7 +60,13 @@ app.post("/api/analyze", async (req, res) => {
     });
   }
 
+  // 키 검증 (요청 헤더 또는 .env)
+  const apiKey = resolveKey(req);
+  const ke = keyError(apiKey);
+  if (ke) return res.status(401).json({ error: ke, ko: "", en: "", tag: "" });
+
   try {
+    const anthropic = new Anthropic({ apiKey });
     const msg = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
@@ -155,5 +153,6 @@ app.post("/api/import", async (req, res) => {
 app.get("/health", (_req, res) => res.json({ ok: true, model: MODEL }));
 
 app.listen(PORT, () => {
-  console.log(`✔ analyze 서버 실행 중 → http://localhost:${PORT}  (model: ${MODEL})`);
+  const src = process.env.ANTHROPIC_API_KEY ? ".env 키 사용" : "키는 앱 ⚙ 설정에서 입력";
+  console.log(`✔ 서버 실행 중 → http://localhost:${PORT}  (model: ${MODEL}, ${src})`);
 });

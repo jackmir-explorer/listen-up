@@ -201,6 +201,8 @@
   .sync-btn.danger{color:#cf4b4b;border-color:#e3c2c2;width:100%;}
   .sync-link{display:inline-block;margin-top:10px;font-size:12px;color:var(--info);text-decoration:none;}
   .sync-note{font-size:11px;color:var(--hint);margin-top:12px;line-height:1.5;}
+  .sec-t{font-size:13px;font-weight:700;color:var(--text);margin-top:4px;}
+  .sec-t .muted{font-weight:400;color:var(--muted);font-size:12px;}
 </style>
 </head>
 <body>
@@ -259,6 +261,13 @@ function resolveApiBase(){
 const API_BASE    = resolveApiBase();
 const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
 
+// Anthropic API 키 — 앱 ⚙ 설정에서 입력해 localStorage 에 보관, analyze 요청 헤더로 전달.
+// (.env 대신 앱에서 입력 — study-app 의 토큰 입력 방식과 동일)
+let ANTHROPIC_KEY = localStorage.getItem("anthropic_key") || "";
+function getAnthropicKey(){ return ANTHROPIC_KEY; }
+function setAnthropicKey(k){ ANTHROPIC_KEY=(k||"").trim();
+  if(ANTHROPIC_KEY) localStorage.setItem("anthropic_key",ANTHROPIC_KEY); else localStorage.removeItem("anthropic_key"); }
+
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // POST /api/analyze   body:{ text, type:"word"|"phrase"|"sentence" }
@@ -267,7 +276,8 @@ async function analyze(text, type){
   if(USE_BACKEND){
     try{
       const res=await fetch(API_BASE+"/api/analyze",{method:"POST",
-        headers:{"Content-Type":"application/json"},body:JSON.stringify({text,type})});
+        headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
+        body:JSON.stringify({text,type})});
       if(!res.ok) throw new Error("analyze "+res.status);
       return await res.json();
     }catch(e){ console.error("analyze failed:",e); return {ko:"",en:"",tag:""}; }
@@ -649,6 +659,8 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
     flash((type==="word"?"단어":type==="phrase"?"구문":"문장")+" 저장 · 분석 중…");
     const a=await analyze(text,type);
     setVocab(v=>v.map(x=>x.id===id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
+    if(USE_BACKEND && !getAnthropicKey() && !a.ko && !a.en && !a.tag)
+      flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 자동 분석돼요");
   };
   const setTag=(id,tag)=>setVocab(v=>v.map(x=>x.id===id?{...x,tag}:x));
   const onWord=(li,wi,tok)=>{
@@ -1087,21 +1099,37 @@ async function gistPull(){
   return Array.isArray(data.clips) ? { updatedAt:Number(data.updatedAt)||0, clips:data.clips } : null;
 }
 
-/* 화면 위 떠 있는 동기화 버튼 + 설정 모달 (모든 화면 공통) */
-function SyncWidget({sync,open,setOpen,onConnect,onDisconnect,onPush,onPull}){
+/* 화면 위 떠 있는 ⚙ 설정 버튼 + 모달 (API 키 + Gist 동기화, 모든 화면 공통) */
+function Settings({sync,open,setOpen,hasKey,onSaveKey,onConnect,onDisconnect,onPush,onPull}){
+  const [key,setKey]=useState("");
   const [token,setToken]=useState("");
   const connected=gistConnected();
+  const needKey = USE_BACKEND && !hasKey;
   return (<>
-    <button className="sync-fab" title="기기 간 동기화(Gist)" onClick={()=>setOpen(o=>!o)}>
-      <span className={"sync-dot s-"+(sync.state||"idle")}></span>☁
-      {sync.msg ? <span className="sync-msg">{sync.msg}</span> : null}
+    <button className="sync-fab" title="설정 (API 키·동기화)" onClick={()=>setOpen(o=>!o)}>
+      <span className={"sync-dot s-"+(needKey?"error":(sync.state||"idle"))}></span>⚙
+      {needKey ? <span className="sync-msg">키 입력</span> : (sync.msg ? <span className="sync-msg">{sync.msg}</span> : null)}
     </button>
     {open && (
       <div className="sync-modal" onClick={()=>setOpen(false)}>
         <div className="sync-card" onClick={e=>e.stopPropagation()}>
-          <div className="sync-h">☁ 기기 간 동기화<span className="x" onClick={()=>setOpen(false)}>✕</span></div>
+          <div className="sync-h">⚙ 설정<span className="x" onClick={()=>setOpen(false)}>✕</span></div>
+
+          <div className="sec-t">Anthropic API 키 <span className="muted">— 뜻·태그 분석에 필요</span></div>
+          {hasKey ? <>
+            <p className="sync-p">상태: <b>입력됨 ✓</b></p>
+            <button className="sync-btn danger" onClick={()=>onSaveKey("")}>키 지우기</button>
+          </> : <>
+            <input className="sync-in" type="password" placeholder="sk-ant-… 키 붙여넣기"
+              value={key} onChange={e=>setKey(e.target.value)}/>
+            <button className="sync-btn primary" onClick={()=>{ onSaveKey(key.trim()); setKey(""); }}>저장</button>
+            <a className="sync-link" href="https://console.anthropic.com/settings/keys"
+              target="_blank" rel="noreferrer">키 발급하기 →</a>
+          </>}
+
+          <div className="sec-t" style={{marginTop:"18px"}}>기기 간 동기화 <span className="muted">— GitHub Gist (선택)</span></div>
           {!connected ? <>
-            <p className="sync-p">GitHub <b>Personal Access Token</b>(classic, <code>gist</code> 권한)을 넣으면 라이브러리가 <b>비공개 Gist</b> 에 백업되고 다른 기기와 동기화됩니다.</p>
+            <p className="sync-p">GitHub <b>PAT</b>(classic, <code>gist</code> 권한)을 넣으면 라이브러리가 <b>비공개 Gist</b> 에 백업·동기화됩니다.</p>
             <input className="sync-in" type="password" placeholder="ghp_… 토큰 붙여넣기"
               value={token} onChange={e=>setToken(e.target.value)}/>
             <button className="sync-btn primary" onClick={()=>onConnect(token.trim())}>연결</button>
@@ -1117,7 +1145,8 @@ function SyncWidget({sync,open,setOpen,onConnect,onDisconnect,onPush,onPull}){
               target="_blank" rel="noreferrer">Gist 열기 →</a>}
             <button className="sync-btn danger" onClick={onDisconnect}>연결 해제</button>
           </>}
-          <p className="sync-note">토큰은 이 기기 브라우저(localStorage)에만 저장됩니다. 공용 PC 에선 사용 후 연결을 해제하세요.</p>
+
+          <p className="sync-note">키·토큰은 이 기기 브라우저(localStorage)에만 저장됩니다. 공용 PC 에선 사용 후 지우세요.</p>
         </div>
       </div>
     )}
@@ -1132,6 +1161,8 @@ function App(){
   const [review,setReview]=useState(null);
   const [sync,setSync]=useState({state: gistConnected()?"syncing":"idle", msg:""});
   const [syncOpen,setSyncOpen]=useState(false);
+  const [hasKey,setHasKey]=useState(!!getAnthropicKey());
+  const saveKey=k=>{ setAnthropicKey(k); setHasKey(!!getAnthropicKey()); };
   const clipsRef=useRef(clips); clipsRef.current=clips;
   const syncedOnce=useRef(false);
   const skipPush=useRef(false);
@@ -1233,7 +1264,7 @@ function App(){
         else if(s==="review")reviewClip(upd); else { setOpenId(null); setScreen("library"); } }}/>; }
   else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
   return <>{view}
-    <SyncWidget sync={sync} open={syncOpen} setOpen={setSyncOpen}
+    <Settings sync={sync} open={syncOpen} setOpen={setSyncOpen} hasKey={hasKey} onSaveKey={saveKey}
       onConnect={connectGist} onDisconnect={disconnectGist} onPush={pushNow} onPull={pullNow}/>
   </>;
 }
