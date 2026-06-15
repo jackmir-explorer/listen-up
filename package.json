@@ -4,7 +4,7 @@
   "private": true,
   "description": "영어 듣기 학습 앱 — 단일 HTML 프런트 + Capacitor 네이티브 래핑 + GitHub Pages (백엔드는 server/)",
   "scripts": {
-    "build:www": "bash scripts/build-www.sh",
+    "build:www": "node scripts/build-www.js",
     "cap:add:android": "npm run build:www && npx cap add android",
     "cap:sync": "npm run build:www && npx cap sync",
     "cap:open:android": "npx cap open android",

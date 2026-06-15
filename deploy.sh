@@ -12,9 +12,8 @@ cd "$(dirname "$0")"
 BRANCH="gh-pages"
 REMOTE="${REMOTE:-origin}"
 
-# 1) www 빌드 (백엔드 주소 주입) + Jekyll 건너뛰기
-bash scripts/build-www.sh
-touch www/.nojekyll
+# 1) www 빌드 (.nojekyll 포함). 백엔드 주소는 보통 앱 ⚙ 설정에서 지정.
+node scripts/build-www.js
 
 # 2) www/ 내용만 gh-pages 로 force-push (임시 리포 사용 — 메인 작업 트리·브랜치 안 건드림)
 REMOTE_URL="$(git remote get-url "$REMOTE")"

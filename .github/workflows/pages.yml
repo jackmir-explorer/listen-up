@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 20
       - name: Build www (listen-up.html → www/index.html)
-        run: bash scripts/build-www.sh
+        run: node scripts/build-www.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
