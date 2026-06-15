@@ -1,0 +1,38 @@
+name: Deploy to GitHub Pages
+
+# main 에 푸시될 때(또는 수동 실행 시) listen-up.html → www → GitHub Pages 배포.
+# 백엔드 주소는 빌드에 굽지 않습니다 — 앱 ⚙ 설정의 "백엔드 서버 주소" 로 런타임 지정.
+# 사용 전 1회: 레포 Settings → Pages → Source = "GitHub Actions" 로 설정.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build www (listen-up.html → www/index.html)
+        run: bash scripts/build-www.sh
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,7 +1,10 @@
-# Render.com 블루프린트 — listen-up 백엔드 원클릭 배포
-# 1) 이 레포를 Render 에 연결하고 "New → Blueprint" 선택
-# 2) 대시보드에서 ANTHROPIC_API_KEY (sk-ant-...) 입력
-# 3) 배포되면 URL(예: https://listen-up-api.onrender.com)을 LISTENUP_API_BASE 로 사용
+# Render.com 블루프린트 — listen-up 백엔드 원클릭 배포 (비밀키 불필요!)
+# 1) 이 레포를 Render 에 연결하고 "New → Blueprint" 선택 → 그대로 배포
+# 2) 배포되면 URL(예: https://listen-up-api.onrender.com)을 복사
+# 3) 앱 ⚙ 설정 → "백엔드 서버 주소" 에 그 URL 입력 (Pages·모바일 공통)
+#
+# Anthropic 키는 앱에서 입력해 요청 헤더로 전달되므로 서버에 키를 둘 필요가 없습니다.
+# (원하면 ANTHROPIC_API_KEY 를 envVars 에 sync:false 로 추가해 서버 폴백 키로 쓸 수도 있음)
 services:
   - type: web
     name: listen-up-api
@@ -10,7 +13,5 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      - key: ANTHROPIC_API_KEY
-        sync: false          # 대시보드에서 직접 입력 (레포에 키 저장 금지)
       - key: PORT
         value: 3001

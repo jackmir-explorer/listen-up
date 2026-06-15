@@ -6,8 +6,8 @@
 - **localStorage 영속화** — 라이브러리(클립·저장한 표현·책갈피)가 브라우저에 저장돼 새로고침/재실행에도 유지됩니다.
 - **GitHub Gist 동기화** — 우하단 ☁ 버튼에서 토큰을 연결하면 라이브러리가 비공개 Gist 에 백업되고 다른 기기와 동기화됩니다. (아래 "기기 간 동기화" 참고)
 - **Capacitor 네이티브 래핑** — 같은 HTML 을 안드로이드 앱으로 패키징. `isNativeApp()` 으로 웹/네이티브 분기.
-- **GitHub Pages 배포** — `deploy.sh` 가 `gh-pages` 브랜치로 푸시.
-- **백엔드는 따로 호스팅** — listen-up 은 study-app 과 달리 서버(Anthropic·YouTube)가 필요. `API_BASE` 를 설정값으로 빼서 호스팅한 주소를 주입합니다.
+- **GitHub Pages 배포** — `.github/workflows/pages.yml`(Actions) 또는 `deploy.sh`.
+- **백엔드는 따로 호스팅(비밀키 불필요)** — 검색·자막은 브라우저에서 직접 못 하므로 서버가 필요. Anthropic 키는 앱에서 입력해 헤더로 전달하므로 서버엔 비밀키가 없어도 됩니다. 백엔드 주소·키는 앱 **⚙ 설정**에서 런타임 지정(재빌드 불필요).
 
 > ⚠️ android/ · ios/ · www/ · node_modules/ 는 **로컬 생성물**이라 커밋하지 않습니다(.gitignore). 아래 명령을 **본인 PC**에서 실행하세요. (이 레포엔 설정·스크립트·문서만 들어 있습니다.)
 
@@ -18,50 +18,54 @@
 - 안드로이드: **Android Studio** (SDK·에뮬레이터 포함)
 - (선택) iOS: macOS + Xcode
 
-## 1. 백엔드 호스팅 (먼저)
-네이티브 앱·Pages 는 `localhost` 서버에 접근할 수 없으므로 백엔드를 한 곳에 올립니다.
+## 1. 백엔드 호스팅 (한 번만 — 비밀키 불필요)
+검색·자막은 브라우저에서 직접 못 하므로 서버가 필요합니다. Anthropic 키는 앱에서 넣어 헤더로 전달되므로 **서버엔 비밀키를 둘 필요가 없어** 그냥 배포하면 됩니다.
 
 **옵션 A — Render (블루프린트, 가장 쉬움)**
-1. 이 레포를 Render 에 연결 → **New → Blueprint** (`render.yaml` 자동 인식)
-2. `ANTHROPIC_API_KEY` (`sk-ant-...`) 입력
-3. 배포되면 URL 확보 (예: `https://listen-up-api.onrender.com`)
+1. 이 레포를 Render 에 연결 → **New → Blueprint** (`render.yaml` 자동 인식) → 그대로 배포
+2. 배포되면 URL 확보 (예: `https://listen-up-api.onrender.com`)
 
-**옵션 B — Docker 직접**
+**옵션 B — Docker 직접 (본인 서버/PC)**
 ```bash
 docker build -t listen-up-api .
-docker run -p 3001:3001 -e ANTHROPIC_API_KEY=sk-ant-... listen-up-api
+docker run -p 3001:3001 listen-up-api
 ```
-> 백엔드는 CORS 를 모든 출처에 허용하므로 Pages/네이티브에서 바로 호출됩니다. 운영 시에는 `server/server.js` 의 `cors()` 를 본인 도메인으로 제한하세요.
+> CORS 가 모든 출처 허용이라 Pages·네이티브에서 바로 호출됩니다. Pages(HTTPS)에서 쓰려면 백엔드도 **HTTPS** 여야 합니다(Render 는 자동 HTTPS).
 
-확보한 주소를 아래 `LISTENUP_API_BASE` 로 씁니다.
+이 URL 은 빌드에 굽지 않고 **앱 ⚙ 설정 → "백엔드 서버 주소"** 에 넣습니다(아래).
 
-## 2. GitHub Pages 배포 (웹)
+## 2. GitHub Pages (웹에서 접근)
+**방법 A — GitHub Actions (자동, 권장)**
+1. 레포 **Settings → Pages → Source = "GitHub Actions"**
+2. `main` 에 푸시(또는 Actions 탭에서 "Deploy to GitHub Pages" 수동 실행) → 자동 빌드·배포
+3. 결과: `https://<your-user>.github.io/listen-up/`
+
+**방법 B — 로컬 스크립트 (즉시)**
 ```bash
-LISTENUP_API_BASE="https://listen-up-api.onrender.com" bash deploy.sh
+bash deploy.sh   # www → gh-pages force-push (최초 1회 Settings→Pages→Source=gh-pages)
 ```
-- `listen-up.html` → `www/index.html` (백엔드 주소 주입) → `gh-pages` 브랜치 force-push
-- **최초 1회**: 레포 **Settings → Pages → Source = gh-pages** 지정
-- 결과: `https://<your-user>.github.io/listen-up/`
+> Pages 를 처음 연 뒤 앱 **⚙ 설정 → "백엔드 서버 주소"** 에 1번 URL, **"Anthropic API 키"** 에 키를 한 번 넣으면 끝.
 
 ## 3. 안드로이드 앱 (Capacitor)
 ```bash
-npm install                                              # Capacitor 설치
-LISTENUP_API_BASE="https://listen-up-api.onrender.com" npm run build:www
-npm run cap:add:android                                  # android/ 생성 (최초 1회)
-npm run cap:open:android                                 # Android Studio 에서 빌드/실행
+npm install               # Capacitor (최초 1회)
+npm run cap:add:android   # android/ 생성 (최초 1회)
+npm run cap:open:android  # Android Studio 에서 ▶ 빌드/실행
 ```
-이후 코드 수정 → 반영:
-```bash
-LISTENUP_API_BASE="https://listen-up-api.onrender.com" npm run cap:sync
-```
-> iOS 는 macOS 에서 `npx cap add ios` → `npx cap open ios` (Xcode). 핵심 구조는 동일합니다.
+코드 수정 후 반영: `npm run cap:sync`
+> 앱을 처음 켜면 **⚙ 설정**에서 ① Anthropic 키, ② 백엔드 서버 주소를 한 번 입력하세요. Gist 동기화를 켜면 PC 라이브러리도 그대로 따라옵니다.
+> iOS 는 macOS 에서 `npx cap add ios` → `npx cap open ios` (Xcode). 구조는 동일.
 
 ---
 
-## API_BASE 우선순위 (`listen-up.html` 의 `resolveApiBase()`)
-1. `window.LISTEN_UP_API_BASE` — 빌드(`build-www.sh`)가 `LISTENUP_API_BASE` 로 주입
-2. `localStorage["listen-up.apiBase"]` — 앱 안에서 런타임 변경
-3. 기본값 — 서버가 직접 서빙하면 같은 출처(`""`), `file://`·네이티브면 개발용 `http://localhost:3001`
+## 앱 설정값 (모두 ⚙ 설정 · 해당 기기 localStorage)
+| 항목 | 키 | 용도 |
+|---|---|---|
+| Anthropic API 키 | `anthropic_key` | 뜻·태그 분석 (헤더로 백엔드 전달) |
+| 백엔드 서버 주소 | `listen-up.apiBase` | Pages·모바일에서 API 호출 대상 |
+| Gist 토큰·ID | `gist_token`·`gist_id` | 기기 간 동기화 |
+
+API 주소 우선순위(`apiBase()`): **⚙ 설정값** → 빌드 주입(`window.LISTEN_UP_API_BASE`) → `file://`·네이티브면 `localhost:3001` → 같은 출처(`""`).
 
 ## 기기 간 동기화 (GitHub Gist)
 study-app 방식: 라이브러리 전체(`{updatedAt, clips}`)를 **비공개 Gist** 한 파일(`listen-up_sync.json`)에 백업하고, 여러 기기에서 같은 Gist 를 공유합니다.

@@ -248,17 +248,18 @@ function isNativeApp(){
     && window.Capacitor.isNativePlatform());
 }
 
-// API_BASE 결정 (설정 가능):
-//   1) window.LISTEN_UP_API_BASE — 배포(네이티브/Pages) 빌드가 주입한 호스팅 서버 주소
-//   2) localStorage["listen-up.apiBase"] — 앱 내에서 런타임 변경
-//   3) 서버가 직접 서빙하면 상대경로(""); file:// 나 네이티브면 개발용 localhost
-function resolveApiBase(){
-  if(typeof window.LISTEN_UP_API_BASE === "string") return window.LISTEN_UP_API_BASE;
-  try{ const s = localStorage.getItem("listen-up.apiBase"); if(s!=null) return s; }catch(e){}
+// API 서버 주소 (런타임 설정): 앱 ⚙ 설정값(localStorage)이 최우선 → 빌드 주입값 →
+// file://·네이티브면 localhost → 같은 출처(""). Pages·모바일에선 ⚙ 에 호스팅 주소만 넣으면 됨.
+const API_URL_KEY = "listen-up.apiBase";
+function getApiUrl(){ try{ return localStorage.getItem(API_URL_KEY) || ""; }catch(e){ return ""; } }
+function setApiUrl(u){ u=(u||"").trim().replace(/\/+$/,"");
+  if(u) localStorage.setItem(API_URL_KEY,u); else localStorage.removeItem(API_URL_KEY); }
+function apiBase(){
+  const s=getApiUrl(); if(s) return s;
+  if(typeof window.LISTEN_UP_API_BASE === "string" && window.LISTEN_UP_API_BASE) return window.LISTEN_UP_API_BASE;
   if(location.protocol === "file:" || isNativeApp()) return "http://localhost:3001";
   return ""; // 서버 같은 출처(상대경로)
 }
-const API_BASE    = resolveApiBase();
 const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
 
 // Anthropic API 키 — 앱 ⚙ 설정에서 입력해 localStorage 에 보관, analyze 요청 헤더로 전달.
@@ -275,7 +276,7 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
 async function analyze(text, type){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/analyze",{method:"POST",
+      const res=await fetch(apiBase()+"/api/analyze",{method:"POST",
         headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
         body:JSON.stringify({text,type})});
       if(!res.ok) throw new Error("analyze "+res.status);
@@ -290,7 +291,7 @@ async function analyze(text, type){
 async function searchVideos(filters){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/search",{method:"POST",
+      const res=await fetch(apiBase()+"/api/search",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify(filters)});
       if(!res.ok) throw new Error("search "+res.status);
       return await res.json();
@@ -305,7 +306,7 @@ async function searchVideos(filters){
 async function fetchTranscript(videoId){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/transcript",{method:"POST",
+      const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
       return await res.json();
@@ -319,7 +320,7 @@ async function fetchTranscript(videoId){
 async function importVideo(url){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/import",{method:"POST",
+      const res=await fetch(apiBase()+"/api/import",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
       if(!res.ok) throw new Error("import "+res.status);
       return await res.json();
@@ -1100,9 +1101,11 @@ async function gistPull(){
 }
 
 /* 화면 위 떠 있는 ⚙ 설정 버튼 + 모달 (API 키 + Gist 동기화, 모든 화면 공통) */
-function Settings({sync,open,setOpen,hasKey,onSaveKey,onConnect,onDisconnect,onPush,onPull}){
+function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onDisconnect,onPush,onPull}){
   const [key,setKey]=useState("");
   const [token,setToken]=useState("");
+  const [api,setApi]=useState(getApiUrl());
+  const [apiSaved,setApiSaved]=useState(false);
   const connected=gistConnected();
   const needKey = USE_BACKEND && !hasKey;
   return (<>
@@ -1126,6 +1129,12 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onConnect,onDisconnect,onP
             <a className="sync-link" href="https://console.anthropic.com/settings/keys"
               target="_blank" rel="noreferrer">키 발급하기 →</a>
           </>}
+
+          <div className="sec-t" style={{marginTop:"18px"}}>백엔드 서버 주소 <span className="muted">— Pages·모바일에서만 필요</span></div>
+          <input className="sync-in" type="text" placeholder="https://your-api.onrender.com"
+            value={api} onChange={e=>{ setApi(e.target.value); setApiSaved(false); }}/>
+          <button className="sync-btn primary" onClick={()=>{ onSaveApiUrl(api.trim()); setApiSaved(true); }}>저장</button>
+          {apiSaved && <span className="sync-link" style={{cursor:"default"}}>저장됨 ✓ (바로 적용)</span>}
 
           <div className="sec-t" style={{marginTop:"18px"}}>기기 간 동기화 <span className="muted">— GitHub Gist (선택)</span></div>
           {!connected ? <>
@@ -1265,6 +1274,7 @@ function App(){
   else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
   return <>{view}
     <Settings sync={sync} open={syncOpen} setOpen={setSyncOpen} hasKey={hasKey} onSaveKey={saveKey}
+      onSaveApiUrl={u=>setApiUrl(u)}
       onConnect={connectGist} onDisconnect={disconnectGist} onPush={pushNow} onPull={pullNow}/>
   </>;
 }
