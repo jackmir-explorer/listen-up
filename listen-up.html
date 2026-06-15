@@ -68,10 +68,7 @@
   @media(max-width:760px){.main{grid-template-columns:1fr;}.grid{grid-template-columns:1fr 1fr;}}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;}
   .player{aspect-ratio:16/9;background:#2c2c2a;border-radius:11px 11px 0 0;display:flex;
-    align-items:center;justify-content:center;position:relative;cursor:pointer;}
-  .player .pp{font-size:30px;color:#d7d5cd;}
-  .player .tc{position:absolute;bottom:8px;left:11px;font-size:11px;color:#b2b0a8;font-variant-numeric:tabular-nums;}
-  .player .mock{position:absolute;top:8px;right:10px;font-size:9px;color:#88867f;}
+    align-items:center;justify-content:center;position:relative;}
   .ctrl{display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
   .pill{font-size:12px;padding:4px 10px;border-radius:8px;border:1px solid var(--border2);
     background:var(--surface);cursor:pointer;color:var(--text);user-select:none;}
@@ -187,21 +184,19 @@
 <script type="text/babel">
 const {useState,useEffect,useRef} = React;
 
-/* ╔══════════════════════════════════════════════════════════════════════╗
-   ║  LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)               ║
-   ║                                                                        ║
-   ║  ▶ 현재 상태: 프런트는 완성, 데이터는 mock.                             ║
-   ║  ▶ 백엔드를 붙이려면 아래 [API LAYER] 한 블록만 건드리면 됨:            ║
-   ║      1) USE_BACKEND = true 로 변경                                      ║
-   ║      2) API_BASE 를 서버 주소로                                         ║
-   ║      3) 서버에 아래 3개 엔드포인트 구현 (요청/응답 계약은 각 함수 주석):  ║
-   ║          POST /api/analyze     {text,type}        → {ko,en,tag}        ║
-   ║          POST /api/search      {minSec,maxSec,...} → [{id,title,...}]   ║
-   ║          POST /api/transcript  {videoId}          → [{start,end,text}] ║
-   ║      · analyze 의 tag 는 반드시 FUNCTION_TAGS 안의 값만 (서버에서 강제). ║
-   ║      · 실제 fetch 코드는 이미 작성돼 있음. 스위치만 켜면 호출됨.         ║
-   ║  ▶ 남은 1곳: 가짜 플레이어(시계) → YouTube IFrame API (Study 컴포넌트).  ║
-   ╚══════════════════════════════════════════════════════════════════════╝ */
+/* ════════════════════════════════════════════════════════
+   LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)
+
+   상태: 백엔드 연동 완료 · 실제 재생까지 동작.
+     · 데이터: 아래 [API LAYER] 가 서버(/api/*) 호출 (USE_BACKEND=true).
+     · 재생: YouTube IFrame API 실제 플레이어 (Study·Review 컴포넌트).
+   백엔드 계약(서버가 구현하는 엔드포인트):
+       POST /api/analyze     {text,type}        → {ko,en,tag}
+       POST /api/search      {minSec,maxSec,...} → [{id,title,...}]
+       POST /api/transcript  {videoId}          → [{start,end,text}]
+   · analyze 의 tag 는 반드시 FUNCTION_TAGS 안의 값만 (서버에서 강제).
+   · mock 으로 되돌리려면 USE_BACKEND=false (mock 구현은 그대로 보존).
+   ════════════════════════════════════════════════════════ */
 
 /* ── 기능 태그 프리셋 (사용자 단어장에서 추출·확정) ──────
    analyze 백엔드는 이 목록을 시스템 프롬프트에 넣어 이 안에서만 tag 를 고르게 할 것 */
@@ -636,7 +631,7 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
       </div>
       <div className="main">
         <div className="card">
-          <div className="player" style={{cursor:"default"}}>
+          <div className="player">
             <div ref={ytBoxRef} style={{position:"absolute",inset:0,width:"100%",height:"100%"}}></div>
           </div>
           <div className="ctrl">
