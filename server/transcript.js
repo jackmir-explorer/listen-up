@@ -1,9 +1,10 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  자막(transcript) 추출                                               ║
-// ║   1순위) youtubei.js getTranscript (안정적, 키리스)                  ║
-// ║   2순위) youtube-transcript (폴백)                                   ║
-// ║   · 영어 트랙 우선 → {start, end, text}(초) 로 정규화                 ║
-// ║   · 자막 없음/실패는 호출부(서버 라우트)에서 [] 로 폴백 처리          ║
+// ║   1) caption track baseUrl(json3) 직접 fetch (가장 견고)             ║
+// ║   2) youtubei.js get_transcript                                      ║
+// ║   3) youtube-transcript (폴백)                                       ║
+// ║   · 영어 트랙 우선 → {start, end, text}(초)                          ║
+// ║   · 모두 실패 시 호출부(라우트)에서 [] 폴백                          ║
 // ╚══════════════════════════════════════════════════════════════════╝
 import { Innertube } from "youtubei.js";
 import { YoutubeTranscript } from "youtube-transcript";
@@ -11,11 +12,9 @@ import { YoutubeTranscript } from "youtube-transcript";
 const EN_LANGS = ["en", "en-US", "en-GB"];
 const round2 = (n) => Math.round(n * 100) / 100;
 
-// Innertube 인스턴스 1회 생성 후 재사용.
 let _yt;
 const getYt = () => (_yt ??= Innertube.create());
 
-// 흔한 HTML 엔티티 정리 (라이브러리가 대부분 처리하지만 안전망).
 function decode(s) {
   return String(s)
     .replace(/&#39;|&apos;/g, "'")
@@ -27,36 +26,68 @@ function decode(s) {
     .trim();
 }
 
-// 1순위) youtubei.js — getInfo → getTranscript. 영어 트랙 있으면 선택.
+// 영어 트랙 우선(수동 자막 > 자동(asr)), 없으면 수동 아무거나, 그래도 없으면 첫 트랙.
+function pickEnglishTrack(tracks) {
+  if (!tracks || !tracks.length) return null;
+  const en = tracks.filter((t) => /^en/i.test(t.language_code || ""));
+  return en.find((t) => t.kind !== "asr") || en[0] || tracks.find((t) => t.kind !== "asr") || tracks[0];
+}
+
+// timedtext base_url 을 json3 로 받아 세그먼트로 변환.
+async function fetchCaptionTrack(baseUrl) {
+  const url = baseUrl + (baseUrl.includes("fmt=") ? "" : "&fmt=json3");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("timedtext " + res.status);
+  const data = await res.json();
+  const out = [];
+  for (const e of data.events || []) {
+    if (!e.segs) continue;
+    const text = decode(e.segs.map((s) => s.utf8 || "").join(""));
+    if (!text) continue;
+    const start = (e.tStartMs || 0) / 1000;
+    const end = (e.tStartMs + (e.dDurationMs || 0)) / 1000;
+    out.push({ start, end: end > start ? end : start, text });
+  }
+  return out;
+}
+
+// 1+2) youtubei.js 경로: caption baseUrl 직접 → 실패 시 get_transcript.
 async function viaInnertube(videoId) {
   const yt = await getYt();
   const info = await yt.getInfo(videoId);
-  let tr = await info.getTranscript();
 
+  // 1) caption track baseUrl(json3) 직접
+  try {
+    const track = pickEnglishTrack(info?.captions?.caption_tracks || []);
+    if (track?.base_url) {
+      const segs = await fetchCaptionTrack(track.base_url);
+      if (segs.length) return segs;
+    }
+  } catch {
+    /* baseUrl 실패 → get_transcript 시도 */
+  }
+
+  // 2) get_transcript
+  let tr = await info.getTranscript();
   try {
     const langs = tr?.languages || [];
     const en = langs.find((l) => /english/i.test(l));
     if (en && en !== tr.selectedLanguage) tr = await tr.selectLanguage(en);
   } catch {
-    /* 언어 선택 실패는 무시하고 기본 트랙 사용 */
+    /* 언어 선택 실패는 무시 */
   }
-
   const segments = tr?.transcript?.content?.body?.initial_segments || [];
   return segments
-    .filter((g) => g && g.start_ms != null && g.snippet) // 섹션 헤더 등 제외
+    .filter((g) => g && g.start_ms != null && g.snippet)
     .map((g) => {
       const start = Number(g.start_ms) / 1000;
       const end = Number(g.end_ms) / 1000;
-      return {
-        start,
-        end: Number.isFinite(end) && end > start ? end : start,
-        text: decode(g.snippet?.text ?? ""),
-      };
+      return { start, end: Number.isFinite(end) && end > start ? end : start, text: decode(g.snippet?.text ?? "") };
     })
     .filter((s) => s.text && Number.isFinite(s.start));
 }
 
-// 2순위) youtube-transcript 폴백. 영어 우선, 없으면 기본 트랙(없으면 throw).
+// 3) youtube-transcript 폴백.
 async function viaYoutubeTranscript(videoId) {
   let raw = null;
   for (const lang of EN_LANGS) {
@@ -64,35 +95,42 @@ async function viaYoutubeTranscript(videoId) {
       raw = await YoutubeTranscript.fetchTranscript(videoId, { lang });
       if (raw && raw.length) break;
     } catch {
-      /* 다음 언어 시도 */
+      /* 다음 언어 */
     }
   }
   if (!raw || !raw.length) raw = await YoutubeTranscript.fetchTranscript(videoId);
-
   return raw
-    .map((seg) => ({
-      start: seg.offset / 1000,
-      end: (seg.offset + seg.duration) / 1000,
-      text: decode(seg.text),
-    }))
+    .map((seg) => ({ start: seg.offset / 1000, end: (seg.offset + seg.duration) / 1000, text: decode(seg.text) }))
     .filter((s) => s.text);
 }
 
-// videoId(또는 URL)로 자막 세그먼트 배열을 반환. 둘 다 실패하면 throw.
+// videoId(또는 URL)로 자막 세그먼트 반환. 모두 실패하면 throw.
 export async function fetchTranscriptSegments(videoId) {
   let segs = [];
   try {
     segs = await viaInnertube(videoId);
   } catch {
-    /* youtubei.js 실패 → 폴백 */
+    /* 폴백으로 */
   }
   if (!segs.length) segs = await viaYoutubeTranscript(videoId); // 실패 시 throw → 라우트가 [] 처리
   return regroupSentences(segs);
 }
 
-// 진단용: 두 추출 경로를 각각 돌려 결과/에러를 그대로 보여준다. (왜 자막이 안 뜨는지 파악)
+// 진단용: 자막 트랙 가시성 + 세 경로 결과/에러를 그대로 보여준다.
 export async function debugTranscript(videoId) {
-  const result = { videoId, innertube: null, youtubeTranscript: null };
+  const result = { videoId, captionTracks: null, innertube: null, youtubeTranscript: null };
+  try {
+    const yt = await getYt();
+    const info = await yt.getInfo(videoId);
+    const tracks = info?.captions?.caption_tracks || [];
+    result.captionTracks = tracks.map((t) => ({
+      lang: t.language_code,
+      kind: t.kind || "manual",
+      name: t.name?.text || "",
+    }));
+  } catch (e) {
+    result.captionTracks = { error: String(e?.message || e) };
+  }
   try {
     const segs = await viaInnertube(videoId);
     result.innertube = { ok: true, count: segs.length, sample: segs.slice(0, 2) };
