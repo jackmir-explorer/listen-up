@@ -203,6 +203,7 @@
   .sync-note{font-size:11px;color:var(--hint);margin-top:12px;line-height:1.5;}
   .sec-t{font-size:13px;font-weight:700;color:var(--text);margin-top:4px;}
   .sec-t .muted{font-weight:400;color:var(--muted);font-size:12px;}
+  .tx-empty{padding:26px 18px;text-align:center;color:var(--muted);font-size:13px;line-height:1.9;}
 </style>
 </head>
 <body>
@@ -706,6 +707,12 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
               : (<><span className="kbd">단어 탭</span> 단어 · <span className="kbd">구문 잡기 → 두 단어</span> 구문 · <span className="kbd">🔖</span> 문장</>)}
           </div>
           <div className="tx">
+            {TX.length===0 && (
+              <div className="tx-empty">
+                이 영상의 자막을 못 받았어요. YouTube 가 클라우드 서버 IP 의 자막 요청을 막기 때문이에요.<br/>
+                <b>PC 의 localhost:3001 에서 이 영상을 추가</b>하면 자막이 들어오고, ⚙ <b>Gist 동기화</b>를 켜면 폰·웹에서도 그대로 보입니다.
+              </div>
+            )}
             {TX.map((l,li)=>(
               <div key={li} className={"ln"+(li===curIdx?" cur":"")}>
                 <span className="ts" onClick={()=>seek(l.start)}>{fmt(l.start)}</span>
