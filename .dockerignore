@@ -1,0 +1,9 @@
+# Docker 빌드에서 제외 (이미지 안에서 npm ci 로 새로 설치하고, 비밀/잡파일은 안 넣음)
+**/node_modules
+**/.env
+**/.env.local
+.git
+*.log
+www
+android
+ios

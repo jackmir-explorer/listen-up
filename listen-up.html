@@ -2,7 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<!-- 배포(네이티브/Pages) 빌드 시 window.LISTEN_UP_API_BASE 주입 지점 (scripts/build-www.sh) -->
+<!--__API_BASE__-->
 <title>Listening Miner</title>
 <style>
   :root{
@@ -68,10 +70,7 @@
   @media(max-width:760px){.main{grid-template-columns:1fr;}.grid{grid-template-columns:1fr 1fr;}}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;}
   .player{aspect-ratio:16/9;background:#2c2c2a;border-radius:11px 11px 0 0;display:flex;
-    align-items:center;justify-content:center;position:relative;cursor:pointer;}
-  .player .pp{font-size:30px;color:#d7d5cd;}
-  .player .tc{position:absolute;bottom:8px;left:11px;font-size:11px;color:#b2b0a8;font-variant-numeric:tabular-nums;}
-  .player .mock{position:absolute;top:8px;right:10px;font-size:9px;color:#88867f;}
+    align-items:center;justify-content:center;position:relative;}
   .ctrl{display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
   .pill{font-size:12px;padding:4px 10px;border-radius:8px;border:1px solid var(--border2);
     background:var(--surface);cursor:pointer;color:var(--text);user-select:none;}
@@ -177,6 +176,33 @@
   .addbtn.added,.addbtn.busy{background:var(--bg);border-color:var(--border);color:var(--hint);cursor:default;}
   .resmeta{font-size:10.5px;color:var(--hint);}
   .nores{text-align:center;color:var(--hint);font-size:13px;padding:36px 20px;}
+  /* Gist 동기화 위젯 */
+  .sync-fab{position:fixed;right:14px;bottom:14px;z-index:50;display:flex;align-items:center;gap:6px;
+    padding:7px 11px;border-radius:999px;border:1px solid var(--border2);background:var(--surface);
+    color:var(--text);font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+  .sync-dot{width:8px;height:8px;border-radius:50%;background:#b9b7af;display:inline-block;}
+  .sync-dot.s-ok{background:#3a9d5d;} .sync-dot.s-error{background:#cf4b4b;}
+  .sync-dot.s-syncing,.sync-dot.s-dirty{background:#d99a2b;}
+  .sync-msg{font-size:11px;color:var(--muted);}
+  .sync-modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.32);display:flex;
+    align-items:center;justify-content:center;padding:18px;}
+  .sync-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    width:100%;max-width:360px;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.2);}
+  .sync-h{font-weight:700;font-size:15px;display:flex;align-items:center;}
+  .sync-h .x{margin-left:auto;cursor:pointer;color:var(--muted);}
+  .sync-p{font-size:13px;color:var(--text);line-height:1.6;margin:12px 0;}
+  .sync-p code{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:12px;}
+  .sync-in{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border2);
+    border-radius:9px;font-size:13px;margin-bottom:10px;background:var(--bg);color:var(--text);}
+  .sync-row{display:flex;gap:8px;}
+  .sync-btn{flex:1;padding:9px 12px;border-radius:9px;border:1px solid var(--border2);
+    background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;margin-top:8px;}
+  .sync-btn.primary{background:var(--info);border-color:var(--info);color:#fff;width:100%;}
+  .sync-btn.danger{color:#cf4b4b;border-color:#e3c2c2;width:100%;}
+  .sync-link{display:inline-block;margin-top:10px;font-size:12px;color:var(--info);text-decoration:none;}
+  .sync-note{font-size:11px;color:var(--hint);margin-top:12px;line-height:1.5;}
+  .sec-t{font-size:13px;font-weight:700;color:var(--text);margin-top:4px;}
+  .sec-t .muted{font-weight:400;color:var(--muted);font-size:12px;}
 </style>
 </head>
 <body>
@@ -187,21 +213,19 @@
 <script type="text/babel">
 const {useState,useEffect,useRef} = React;
 
-/* ╔══════════════════════════════════════════════════════════════════════╗
-   ║  LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)               ║
-   ║                                                                        ║
-   ║  ▶ 현재 상태: 프런트는 완성, 데이터는 mock.                             ║
-   ║  ▶ 백엔드를 붙이려면 아래 [API LAYER] 한 블록만 건드리면 됨:            ║
-   ║      1) USE_BACKEND = true 로 변경                                      ║
-   ║      2) API_BASE 를 서버 주소로                                         ║
-   ║      3) 서버에 아래 3개 엔드포인트 구현 (요청/응답 계약은 각 함수 주석):  ║
-   ║          POST /api/analyze     {text,type}        → {ko,en,tag}        ║
-   ║          POST /api/search      {minSec,maxSec,...} → [{id,title,...}]   ║
-   ║          POST /api/transcript  {videoId}          → [{start,end,text}] ║
-   ║      · analyze 의 tag 는 반드시 FUNCTION_TAGS 안의 값만 (서버에서 강제). ║
-   ║      · 실제 fetch 코드는 이미 작성돼 있음. 스위치만 켜면 호출됨.         ║
-   ║  ▶ 남은 1곳: 가짜 플레이어(시계) → YouTube IFrame API (Study 컴포넌트).  ║
-   ╚══════════════════════════════════════════════════════════════════════╝ */
+/* ════════════════════════════════════════════════════════
+   LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)
+
+   상태: 백엔드 연동 완료 · 실제 재생까지 동작.
+     · 데이터: 아래 [API LAYER] 가 서버(/api/*) 호출 (USE_BACKEND=true).
+     · 재생: YouTube IFrame API 실제 플레이어 (Study·Review 컴포넌트).
+   백엔드 계약(서버가 구현하는 엔드포인트):
+       POST /api/analyze     {text,type}        → {ko,en,tag}
+       POST /api/search      {minSec,maxSec,...} → [{id,title,...}]
+       POST /api/transcript  {videoId}          → [{start,end,text}]
+   · analyze 의 tag 는 반드시 FUNCTION_TAGS 안의 값만 (서버에서 강제).
+   · mock 으로 되돌리려면 USE_BACKEND=false (mock 구현은 그대로 보존).
+   ════════════════════════════════════════════════════════ */
 
 /* ── 기능 태그 프리셋 (사용자 단어장에서 추출·확정) ──────
    analyze 백엔드는 이 목록을 시스템 프롬프트에 넣어 이 안에서만 tag 를 고르게 할 것 */
@@ -217,8 +241,33 @@ const FUNCTION_TAGS=[
    API LAYER  ←★ 백엔드 연동은 여기만 수정
    ════════════════════════════════════════════════════════ */
 const USE_BACKEND = true;                   // ←★ 켜짐: /api/analyze 호출 (mock 끄려면 false)
-const API_BASE    = location.protocol === "file:" ? "http://localhost:3001" : ""; // 서버가 직접 서빙하면 상대경로(같은 출처); file:// 로 열면 localhost
+
+// Capacitor 네이티브 앱 여부 (study-app 방식: isNativeApp() 로 웹/네이티브 분기)
+function isNativeApp(){
+  return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function"
+    && window.Capacitor.isNativePlatform());
+}
+
+// API 서버 주소 (런타임 설정): 앱 ⚙ 설정값(localStorage)이 최우선 → 빌드 주입값 →
+// file://·네이티브면 localhost → 같은 출처(""). Pages·모바일에선 ⚙ 에 호스팅 주소만 넣으면 됨.
+const API_URL_KEY = "listen-up.apiBase";
+function getApiUrl(){ try{ return localStorage.getItem(API_URL_KEY) || ""; }catch(e){ return ""; } }
+function setApiUrl(u){ u=(u||"").trim().replace(/\/+$/,"");
+  if(u) localStorage.setItem(API_URL_KEY,u); else localStorage.removeItem(API_URL_KEY); }
+function apiBase(){
+  const s=getApiUrl(); if(s) return s;
+  if(typeof window.LISTEN_UP_API_BASE === "string" && window.LISTEN_UP_API_BASE) return window.LISTEN_UP_API_BASE;
+  if(location.protocol === "file:" || isNativeApp()) return "http://localhost:3001";
+  return ""; // 서버 같은 출처(상대경로)
+}
 const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
+
+// Anthropic API 키 — 앱 ⚙ 설정에서 입력해 localStorage 에 보관, analyze 요청 헤더로 전달.
+// (.env 대신 앱에서 입력 — study-app 의 토큰 입력 방식과 동일)
+let ANTHROPIC_KEY = localStorage.getItem("anthropic_key") || "";
+function getAnthropicKey(){ return ANTHROPIC_KEY; }
+function setAnthropicKey(k){ ANTHROPIC_KEY=(k||"").trim();
+  if(ANTHROPIC_KEY) localStorage.setItem("anthropic_key",ANTHROPIC_KEY); else localStorage.removeItem("anthropic_key"); }
 
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
@@ -227,8 +276,9 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
 async function analyze(text, type){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/analyze",{method:"POST",
-        headers:{"Content-Type":"application/json"},body:JSON.stringify({text,type})});
+      const res=await fetch(apiBase()+"/api/analyze",{method:"POST",
+        headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
+        body:JSON.stringify({text,type})});
       if(!res.ok) throw new Error("analyze "+res.status);
       return await res.json();
     }catch(e){ console.error("analyze failed:",e); return {ko:"",en:"",tag:""}; }
@@ -241,7 +291,7 @@ async function analyze(text, type){
 async function searchVideos(filters){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/search",{method:"POST",
+      const res=await fetch(apiBase()+"/api/search",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify(filters)});
       if(!res.ok) throw new Error("search "+res.status);
       return await res.json();
@@ -256,7 +306,7 @@ async function searchVideos(filters){
 async function fetchTranscript(videoId){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/transcript",{method:"POST",
+      const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
       return await res.json();
@@ -270,7 +320,7 @@ async function fetchTranscript(videoId){
 async function importVideo(url){
   if(USE_BACKEND){
     try{
-      const res=await fetch(API_BASE+"/api/import",{method:"POST",
+      const res=await fetch(apiBase()+"/api/import",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
       if(!res.ok) throw new Error("import "+res.status);
       return await res.json();
@@ -610,6 +660,8 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
     flash((type==="word"?"단어":type==="phrase"?"구문":"문장")+" 저장 · 분석 중…");
     const a=await analyze(text,type);
     setVocab(v=>v.map(x=>x.id===id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
+    if(USE_BACKEND && !getAnthropicKey() && !a.ko && !a.en && !a.tag)
+      flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 자동 분석돼요");
   };
   const setTag=(id,tag)=>setVocab(v=>v.map(x=>x.id===id?{...x,tag}:x));
   const onWord=(li,wi,tok)=>{
@@ -636,7 +688,7 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
       </div>
       <div className="main">
         <div className="card">
-          <div className="player" style={{cursor:"default"}}>
+          <div className="player">
             <div ref={ytBoxRef} style={{position:"absolute",inset:0,width:"100%",height:"100%"}}></div>
           </div>
           <div className="ctrl">
@@ -978,12 +1030,208 @@ function Browse({clips,onNav,onOpenAt}){
   );
 }
 
+/* ── 로컬 영속화: 라이브러리(clips)를 localStorage 에 저장·복원 ──
+   study-app 방식(단일 파일 + localStorage). 기기 간 백업은 아래 Gist 동기화로 확장됨. */
+const STORE_KEY = "listen-up.library.v1";
+function loadClips(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return v; }
+  }catch(e){ console.error("library load 실패:", e); }
+  return seedClips();            // 저장된 게 없으면 시드(예시) 라이브러리
+}
+function saveClips(clips){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(clips)); }
+  catch(e){ console.error("library save 실패:", e); }
+}
+
+/* ── GitHub Gist 동기화 (study-app 방식: localStorage ↔ 비공개 Gist) ──
+   토큰 'gist_token'(gist 스코프 PAT) + 'gist_id'. 라이브러리 전체를
+   {updatedAt, clips} 한 덩어리로 비공개 Gist 에 PATCH/POST. last-write-wins. */
+const GIST_FILE = "listen-up_sync.json";
+const TS_KEY    = "listen-up.updatedAt";
+let   GIST_TOKEN = localStorage.getItem("gist_token") || "";
+let   GIST_ID    = localStorage.getItem("gist_id")    || "";
+
+function gistConnected(){ return !!GIST_TOKEN; }
+function gistHeaders(){
+  return { "Authorization":"token "+GIST_TOKEN,
+           "Accept":"application/vnd.github+json",
+           "Content-Type":"application/json" };
+}
+function setGistToken(t){ GIST_TOKEN=(t||"").trim();
+  if(GIST_TOKEN) localStorage.setItem("gist_token",GIST_TOKEN); else localStorage.removeItem("gist_token"); }
+function setGistId(id){ GIST_ID=id||"";
+  if(GIST_ID) localStorage.setItem("gist_id",GIST_ID); else localStorage.removeItem("gist_id"); }
+function localTS(){ return Number(localStorage.getItem(TS_KEY)||0); }
+
+// 라이브러리를 Gist 로 올림(없으면 비공개 Gist 생성). 성공 시 updatedAt 반환.
+async function gistPush(clips){
+  if(!GIST_TOKEN) throw new Error("토큰이 없습니다");
+  const updatedAt = Date.now();
+  const file = { content: JSON.stringify({ updatedAt, clips }) };
+  if(!GIST_ID){
+    const res=await fetch("https://api.github.com/gists",{ method:"POST", headers:gistHeaders(),
+      body:JSON.stringify({ description:"Listen-up sync", public:false, files:{ [GIST_FILE]:file } }) });
+    if(!res.ok) throw new Error("Gist 생성 실패 ("+res.status+")");
+    setGistId((await res.json()).id);
+  }else{
+    const res=await fetch("https://api.github.com/gists/"+GIST_ID,{ method:"PATCH", headers:gistHeaders(),
+      body:JSON.stringify({ files:{ [GIST_FILE]:file } }) });
+    if(res.status===404){ setGistId(""); return gistPush(clips); } // 삭제된 gist → 재생성
+    if(!res.ok) throw new Error("Gist 저장 실패 ("+res.status+")");
+  }
+  localStorage.setItem(TS_KEY,String(updatedAt));
+  return updatedAt;
+}
+
+// Gist 에서 라이브러리 가져오기 → {updatedAt, clips} 또는 null.
+async function gistPull(){
+  if(!GIST_TOKEN || !GIST_ID) return null;
+  const res=await fetch("https://api.github.com/gists/"+GIST_ID,{ headers:gistHeaders() });
+  if(res.status===404){ setGistId(""); return null; }
+  if(!res.ok) throw new Error("Gist 불러오기 실패 ("+res.status+")");
+  const j=await res.json();
+  const f=j.files && j.files[GIST_FILE];
+  if(!f || !f.content) return null;
+  let content=f.content;
+  if(f.truncated && f.raw_url){ content=await (await fetch(f.raw_url,{headers:gistHeaders()})).text(); }
+  const data=JSON.parse(content);
+  return Array.isArray(data.clips) ? { updatedAt:Number(data.updatedAt)||0, clips:data.clips } : null;
+}
+
+/* 화면 위 떠 있는 ⚙ 설정 버튼 + 모달 (API 키 + Gist 동기화, 모든 화면 공통) */
+function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onDisconnect,onPush,onPull}){
+  const [key,setKey]=useState("");
+  const [token,setToken]=useState("");
+  const [api,setApi]=useState(getApiUrl());
+  const [apiSaved,setApiSaved]=useState(false);
+  const connected=gistConnected();
+  const needKey = USE_BACKEND && !hasKey;
+  return (<>
+    <button className="sync-fab" title="설정 (API 키·동기화)" onClick={()=>setOpen(o=>!o)}>
+      <span className={"sync-dot s-"+(needKey?"error":(sync.state||"idle"))}></span>⚙
+      {needKey ? <span className="sync-msg">키 입력</span> : (sync.msg ? <span className="sync-msg">{sync.msg}</span> : null)}
+    </button>
+    {open && (
+      <div className="sync-modal" onClick={()=>setOpen(false)}>
+        <div className="sync-card" onClick={e=>e.stopPropagation()}>
+          <div className="sync-h">⚙ 설정<span className="x" onClick={()=>setOpen(false)}>✕</span></div>
+
+          <div className="sec-t">Anthropic API 키 <span className="muted">— 뜻·태그 분석에 필요</span></div>
+          {hasKey ? <>
+            <p className="sync-p">상태: <b>입력됨 ✓</b></p>
+            <button className="sync-btn danger" onClick={()=>onSaveKey("")}>키 지우기</button>
+          </> : <>
+            <input className="sync-in" type="password" placeholder="sk-ant-… 키 붙여넣기"
+              value={key} onChange={e=>setKey(e.target.value)}/>
+            <button className="sync-btn primary" onClick={()=>{ onSaveKey(key.trim()); setKey(""); }}>저장</button>
+            <a className="sync-link" href="https://console.anthropic.com/settings/keys"
+              target="_blank" rel="noreferrer">키 발급하기 →</a>
+          </>}
+
+          <div className="sec-t" style={{marginTop:"18px"}}>백엔드 서버 주소 <span className="muted">— Pages·모바일에서만 필요</span></div>
+          <input className="sync-in" type="text" placeholder="https://your-api.onrender.com"
+            value={api} onChange={e=>{ setApi(e.target.value); setApiSaved(false); }}/>
+          <button className="sync-btn primary" onClick={()=>{ onSaveApiUrl(api.trim()); setApiSaved(true); }}>저장</button>
+          {apiSaved && <span className="sync-link" style={{cursor:"default"}}>저장됨 ✓ (바로 적용)</span>}
+
+          <div className="sec-t" style={{marginTop:"18px"}}>기기 간 동기화 <span className="muted">— GitHub Gist (선택)</span></div>
+          {!connected ? <>
+            <p className="sync-p">GitHub <b>PAT</b>(classic, <code>gist</code> 권한)을 넣으면 라이브러리가 <b>비공개 Gist</b> 에 백업·동기화됩니다.</p>
+            <input className="sync-in" type="password" placeholder="ghp_… 토큰 붙여넣기"
+              value={token} onChange={e=>setToken(e.target.value)}/>
+            <button className="sync-btn primary" onClick={()=>onConnect(token.trim())}>연결</button>
+            <a className="sync-link" href="https://github.com/settings/tokens/new?scopes=gist&description=listen-up"
+              target="_blank" rel="noreferrer">토큰 발급하기 →</a>
+          </> : <>
+            <p className="sync-p">상태: <b>{sync.msg||"연결됨"}</b></p>
+            <div className="sync-row">
+              <button className="sync-btn" onClick={onPush}>지금 올리기 ↑</button>
+              <button className="sync-btn" onClick={onPull}>지금 내려받기 ↓</button>
+            </div>
+            {GIST_ID && <a className="sync-link" href={"https://gist.github.com/"+GIST_ID}
+              target="_blank" rel="noreferrer">Gist 열기 →</a>}
+            <button className="sync-btn danger" onClick={onDisconnect}>연결 해제</button>
+          </>}
+
+          <p className="sync-note">키·토큰은 이 기기 브라우저(localStorage)에만 저장됩니다. 공용 PC 에선 사용 후 지우세요.</p>
+        </div>
+      </div>
+    )}
+  </>);
+}
+
 function App(){
-  const [clips,setClips]=useState(seedClips);
+  const [clips,setClips]=useState(loadClips);
   const [screen,setScreen]=useState("library");
   const [openId,setOpenId]=useState(null);
   const [openSeek,setOpenSeek]=useState(null);
   const [review,setReview]=useState(null);
+  const [sync,setSync]=useState({state: gistConnected()?"syncing":"idle", msg:""});
+  const [syncOpen,setSyncOpen]=useState(false);
+  const [hasKey,setHasKey]=useState(!!getAnthropicKey());
+  const saveKey=k=>{ setAnthropicKey(k); setHasKey(!!getAnthropicKey()); };
+  const clipsRef=useRef(clips); clipsRef.current=clips;
+  const syncedOnce=useRef(false);
+  const skipPush=useRef(false);
+  const pushTimer=useRef(null);
+
+  useEffect(()=>{ saveClips(clips); },[clips]);   // 변경 시마다 로컬 저장
+
+  // 마운트 시 1회: Gist 와 초기 동기화 (원격이 더 새것이면 내려받고, 아니면 백업)
+  useEffect(()=>{
+    if(!gistConnected()) return;
+    (async()=>{
+      setSync({state:"syncing",msg:"동기화 중…"});
+      try{
+        const remote=await gistPull();
+        if(remote && remote.updatedAt>localTS()){
+          skipPush.current=true; setClips(remote.clips); saveClips(remote.clips);
+          localStorage.setItem(TS_KEY,String(remote.updatedAt));
+          setSync({state:"ok",msg:"내려받음"});
+        }else{
+          await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"});
+        }
+      }catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
+      finally{ syncedOnce.current=true; }
+    })();
+  },[]);
+
+  // 변경 시 디바운스(2.5s) 푸시 — 초기 동기화 후에만, 방금 내려받은 건 제외
+  useEffect(()=>{
+    if(!syncedOnce.current) return;
+    if(skipPush.current){ skipPush.current=false; return; }
+    if(!gistConnected()) return;
+    clearTimeout(pushTimer.current);
+    setSync(s=>s.state==="syncing"?s:{state:"dirty",msg:"변경됨"});
+    pushTimer.current=setTimeout(async()=>{
+      setSync({state:"syncing",msg:"저장 중…"});
+      try{ await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+      catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
+    },2500);
+  },[clips]);
+
+  const pushNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"저장 중…"});
+    try{ await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+    catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const pullNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"불러오는 중…"});
+    try{ const r=await gistPull();
+      if(r){ skipPush.current=true; setClips(r.clips); saveClips(r.clips);
+        localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
+      else setSync({state:"ok",msg:"원격 비어있음"}); }
+    catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const connectGist=async(t)=>{ setSyncOpen(false); setGistToken(t);
+    if(!t){ setSync({state:"idle",msg:""}); return; }
+    setSync({state:"syncing",msg:"연결 중…"});
+    try{ const r=await gistPull();
+      if(r && r.updatedAt>localTS()){ skipPush.current=true; setClips(r.clips); saveClips(r.clips);
+        localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
+      else { await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+      syncedOnce.current=true;
+    }catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const disconnectGist=()=>{ setGistToken(""); setGistId(""); localStorage.removeItem(TS_KEY);
+    syncedOnce.current=false; setSync({state:"idle",msg:""}); setSyncOpen(false); };
 
   const persist=u=>setClips(cs=>cs.map(c=>c.id===u.id?u:c));
   const removeClip=id=>setClips(cs=>cs.filter(c=>c.id!==id));
@@ -1014,15 +1262,21 @@ function App(){
     else if(s==="browse")setScreen("browse"); else if(s==="review")reviewAll();
     else if(s==="study"&&openId)setScreen("study"); };
 
-  if(screen==="search") return <Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop}/>;
-  if(screen==="browse") return <Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
-  if(screen==="review") return <ReviewMode cards={review.cards} sourceLabel={review.label} onExit={exitReview}/>;
-  if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
-    return <Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
+  let view;
+  if(screen==="search") view=<Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop}/>;
+  else if(screen==="browse") view=<Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
+  else if(screen==="review") view=<ReviewMode cards={review.cards} sourceLabel={review.label} onExit={exitReview}/>;
+  else if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
+    view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
       onNav={(s,upd)=>{ if(s==="study")return; persist(upd);
         if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
         else if(s==="review")reviewClip(upd); else { setOpenId(null); setScreen("library"); } }}/>; }
-  return <Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
+  else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
+  return <>{view}
+    <Settings sync={sync} open={syncOpen} setOpen={setSyncOpen} hasKey={hasKey} onSaveKey={saveKey}
+      onSaveApiUrl={u=>setApiUrl(u)}
+      onConnect={connectGist} onDisconnect={disconnectGist} onPush={pushNow} onPull={pullNow}/>
+  </>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>

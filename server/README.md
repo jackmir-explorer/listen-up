@@ -75,7 +75,12 @@ npm install
 
 > 최신 SDK를 원하면: `npm install @anthropic-ai/sdk@latest`
 
-## .env 설정
+## API 키 — 두 가지 방법
+
+- **권장: 앱에서 입력** — 서버를 키 없이 그냥 띄우고(`npm start`), 브라우저에서 앱 우하단 **⚙ 설정 → Anthropic API 키**에 `sk-ant-…` 를 붙여넣으면 끝. `.env` 를 안 만들어도 됩니다. (키는 그 기기 브라우저 localStorage 에 저장되고, 분석 요청 때 헤더로 서버에 전달)
+- **또는 .env** — 아래처럼 `server/.env` 에 키를 넣어두면 서버가 폴백으로 사용합니다(여러 사용자/자동화에 편리).
+
+## .env 설정 (선택)
 
 `server/.env.example` 을 복사해 `server/.env` 를 만들고 키를 채웁니다.
 
@@ -106,7 +111,7 @@ npm start
 성공하면 다음과 같이 출력됩니다:
 
 ```
-✔ analyze 서버 실행 중 → http://localhost:3001  (model: claude-sonnet-4-6)
+✔ 서버 실행 중 → http://localhost:3001  (model: claude-sonnet-4-6, 키는 앱 ⚙ 설정에서 입력)
 ```
 
 개발 중 자동 재시작을 원하면: `npm run dev`
@@ -152,6 +157,6 @@ const API_BASE    = "http://localhost:3001";  // 위 포트와 일치
 - **태그 동기화:** `server/functionTags.js` 는 `listen-up.html` 의 `FUNCTION_TAGS` 사본입니다.
   한쪽을 수정하면 **반드시 다른 쪽도** 똑같이 맞추세요.
 - **태그 분류 조정:** 특정 표현이 원하는 태그로 안 나오면 `functionTags.js` 의 `TAG_EXAMPLES` 에서 해당 태그에 그 표현(또는 비슷한 예)을 추가하세요. 모델이 예시 기준으로 분류하므로 바로 반영됩니다(서버 재시작 필요).
-- **end-to-end:** 검색 → "+ 추가" 시 실제 영상 ID로 자막을 받아 학습 화면에서 진짜 대본이 뜹니다. (라이브러리의 초기 mock 클립은 ID가 가짜라 자막이 비어 보일 수 있음 — 검색으로 추가한 클립을 쓰세요.) 단, 재생은 아직 가짜 플레이어이며 YouTube IFrame 교체가 마지막 단계입니다.
+- **end-to-end:** 검색 → "+ 추가" 시 실제 영상 ID로 자막을 받아 학습 화면에서 진짜 대본이 뜹니다. (라이브러리의 초기 mock 클립은 ID가 가짜라 자막이 비어 보일 수 있음 — 검색으로 추가한 클립을 쓰세요.) 재생도 YouTube IFrame 플레이어로 학습·복습 모두 실제 영상이 재생됩니다.
 - **검색 한계:** 자막이 없는 영상을 추가하면 대본이 비어 보입니다. 또 키리스 검색이라 YouTube 내부 변경 시 깨질 수 있습니다.
 - **CORS:** 지금은 로컬 개발용으로 모든 출처를 허용합니다. 배포 시에는 허용 origin 을 제한하세요.

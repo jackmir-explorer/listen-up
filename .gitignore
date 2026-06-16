@@ -18,3 +18,8 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Capacitor / 모바일·Pages 빌드 산출물 (로컬에서 생성 — 커밋 안 함)
+/www/
+/android/
+/ios/
