@@ -150,7 +150,17 @@ app.post("/api/import", async (req, res) => {
 });
 
 // 헬스 체크 (선택) — 서버가 떴는지 빠르게 확인용.
-app.get("/health", (_req, res) => res.json({ ok: true, model: MODEL }));
+// 헬스 체크 + 배포 확인: Render 가 주입하는 커밋/브랜치로 "지금 어떤 코드가 떠 있는지" 확인 가능.
+const BOOT_AT = new Date().toISOString();
+app.get("/health", (_req, res) =>
+  res.json({
+    ok: true,
+    model: MODEL,
+    commit: process.env.RENDER_GIT_COMMIT || null,
+    branch: process.env.RENDER_GIT_BRANCH || null,
+    bootAt: BOOT_AT,
+  })
+);
 
 app.listen(PORT, () => {
   const src = process.env.ANTHROPIC_API_KEY ? ".env 키 사용" : "키는 앱 ⚙ 설정에서 입력";
