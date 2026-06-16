@@ -52,7 +52,13 @@ export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topi
   const parts = [...topicsEn, hint].filter(Boolean);
   const query = parts.length ? parts.join(" ") : "english podcast interview";
 
-  const search = await yt.search(query, { type: "video" });
+  // 자막(CC) 있는 영상만 — YouTube 검색의 subtitles 필터. (듣기 학습엔 자막이 필수)
+  let search;
+  try {
+    search = await yt.search(query, { type: "video", features: ["subtitles"] });
+  } catch {
+    search = await yt.search(query, { type: "video" }); // 필터 미지원/오류 시 일반 검색으로 폴백
+  }
   const nodes = (search.results || search.videos || []).filter(
     (v) => (v?.id || v?.video_id) && v?.duration?.seconds
   );

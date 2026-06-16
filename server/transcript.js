@@ -1,13 +1,19 @@
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║  자막(transcript) 추출 — youtube-transcript 래퍼                     ║
-// ║   · 영어 트랙 우선(없으면 기본 트랙)                                  ║
-// ║   · {text, duration(ms), offset(ms)} → {start, end, text}(초) 변환    ║
-// ║   · 자막 없음/비활성 등은 호출부(서버 라우트)에서 [] 로 폴백 처리      ║
+// ║  자막(transcript) 추출                                               ║
+// ║   1순위) youtubei.js getTranscript (안정적, 키리스)                  ║
+// ║   2순위) youtube-transcript (폴백)                                   ║
+// ║   · 영어 트랙 우선 → {start, end, text}(초) 로 정규화                 ║
+// ║   · 자막 없음/실패는 호출부(서버 라우트)에서 [] 로 폴백 처리          ║
 // ╚══════════════════════════════════════════════════════════════════╝
+import { Innertube } from "youtubei.js";
 import { YoutubeTranscript } from "youtube-transcript";
 
 const EN_LANGS = ["en", "en-US", "en-GB"];
 const round2 = (n) => Math.round(n * 100) / 100;
+
+// Innertube 인스턴스 1회 생성 후 재사용.
+let _yt;
+const getYt = () => (_yt ??= Innertube.create());
 
 // 흔한 HTML 엔티티 정리 (라이브러리가 대부분 처리하지만 안전망).
 function decode(s) {
@@ -21,11 +27,38 @@ function decode(s) {
     .trim();
 }
 
-// videoId(또는 URL)로 자막 세그먼트 배열을 반환. 자막이 전혀 없으면 throw.
-export async function fetchTranscriptSegments(videoId) {
-  let raw = null;
+// 1순위) youtubei.js — getInfo → getTranscript. 영어 트랙 있으면 선택.
+async function viaInnertube(videoId) {
+  const yt = await getYt();
+  const info = await yt.getInfo(videoId);
+  let tr = await info.getTranscript();
 
-  // 1) 영어 트랙 우선 시도
+  try {
+    const langs = tr?.languages || [];
+    const en = langs.find((l) => /english/i.test(l));
+    if (en && en !== tr.selectedLanguage) tr = await tr.selectLanguage(en);
+  } catch {
+    /* 언어 선택 실패는 무시하고 기본 트랙 사용 */
+  }
+
+  const segments = tr?.transcript?.content?.body?.initial_segments || [];
+  return segments
+    .filter((g) => g && g.start_ms != null && g.snippet) // 섹션 헤더 등 제외
+    .map((g) => {
+      const start = Number(g.start_ms) / 1000;
+      const end = Number(g.end_ms) / 1000;
+      return {
+        start,
+        end: Number.isFinite(end) && end > start ? end : start,
+        text: decode(g.snippet?.text ?? ""),
+      };
+    })
+    .filter((s) => s.text && Number.isFinite(s.start));
+}
+
+// 2순위) youtube-transcript 폴백. 영어 우선, 없으면 기본 트랙(없으면 throw).
+async function viaYoutubeTranscript(videoId) {
+  let raw = null;
   for (const lang of EN_LANGS) {
     try {
       raw = await YoutubeTranscript.fetchTranscript(videoId, { lang });
@@ -34,19 +67,26 @@ export async function fetchTranscriptSegments(videoId) {
       /* 다음 언어 시도 */
     }
   }
+  if (!raw || !raw.length) raw = await YoutubeTranscript.fetchTranscript(videoId);
 
-  // 2) 영어가 없으면 기본(첫) 트랙 — 여기서 못 찾으면 throw 됨
-  if (!raw || !raw.length) {
-    raw = await YoutubeTranscript.fetchTranscript(videoId);
-  }
-
-  const segs = raw
+  return raw
     .map((seg) => ({
       start: seg.offset / 1000,
       end: (seg.offset + seg.duration) / 1000,
       text: decode(seg.text),
     }))
     .filter((s) => s.text);
+}
+
+// videoId(또는 URL)로 자막 세그먼트 배열을 반환. 둘 다 실패하면 throw.
+export async function fetchTranscriptSegments(videoId) {
+  let segs = [];
+  try {
+    segs = await viaInnertube(videoId);
+  } catch {
+    /* youtubei.js 실패 → 폴백 */
+  }
+  if (!segs.length) segs = await viaYoutubeTranscript(videoId); // 실패 시 throw → 라우트가 [] 처리
   return regroupSentences(segs);
 }
 
