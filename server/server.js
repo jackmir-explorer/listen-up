@@ -14,8 +14,8 @@ import express from "express";
 import cors from "cors";
 import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT, OUTPUT_SCHEMA, TAG_SET } from "./functionTags.js";
-import { fetchTranscriptSegments } from "./transcript.js";
-import { searchVideos, getVideoMeta } from "./search.js";
+import { fetchTranscriptSegments, debugTranscript } from "./transcript.js";
+import { searchVideos, getVideoMeta, extractVideoId } from "./search.js";
 
 // .env 를 이 파일 기준 절대경로로 로드 — 실행 위치(cwd)와 무관하게 동작.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +150,17 @@ app.post("/api/import", async (req, res) => {
 });
 
 // 헬스 체크 (선택) — 서버가 떴는지 빠르게 확인용.
+// 자막 진단: GET /api/transcript-debug?videoId=<id 또는 URL>  (두 추출 경로 결과/에러 표시)
+app.get("/api/transcript-debug", async (req, res) => {
+  const id = extractVideoId(req.query.videoId || req.query.id || "");
+  if (!id) return res.status(400).json({ error: "?videoId=<영상 ID 또는 URL> 가 필요합니다." });
+  try {
+    res.json(await debugTranscript(id));
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 // 헬스 체크 + 배포 확인: Render 가 주입하는 커밋/브랜치로 "지금 어떤 코드가 떠 있는지" 확인 가능.
 const BOOT_AT = new Date().toISOString();
 app.get("/health", (_req, res) =>

@@ -90,6 +90,24 @@ export async function fetchTranscriptSegments(videoId) {
   return regroupSentences(segs);
 }
 
+// 진단용: 두 추출 경로를 각각 돌려 결과/에러를 그대로 보여준다. (왜 자막이 안 뜨는지 파악)
+export async function debugTranscript(videoId) {
+  const result = { videoId, innertube: null, youtubeTranscript: null };
+  try {
+    const segs = await viaInnertube(videoId);
+    result.innertube = { ok: true, count: segs.length, sample: segs.slice(0, 2) };
+  } catch (e) {
+    result.innertube = { ok: false, error: String(e?.message || e) };
+  }
+  try {
+    const segs = await viaYoutubeTranscript(videoId);
+    result.youtubeTranscript = { ok: true, count: segs.length, sample: segs.slice(0, 2) };
+  } catch (e) {
+    result.youtubeTranscript = { ok: false, error: String(e?.message || e) };
+  }
+  return result;
+}
+
 // 잘게 쪼개진 자막을 문장 단위로 합침: 문장부호(. ! ?)에서 끊되, 부호가 없으면
 // 너무 길어지지 않게 ~14초/220자에서 끊는다. (구문 선택이 한 줄 안에서 되도록)
 function regroupSentences(segs) {
