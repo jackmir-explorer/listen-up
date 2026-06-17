@@ -809,7 +809,7 @@ function ReviewMode({cards,sourceLabel,nextDue,onExit,onGrade}){
     const est=Math.min(16, Math.max(4, words*0.42));
     const end=(cur.te && cur.te>cur.ts) ? cur.te : cur.ts+est;
     segEnd.current=end+0.4; setT(cur.ts);   // 끝 단어 안 잘리게 약간 여유
-    try{ if(cur.videoId) p.loadVideoById({videoId:cur.videoId, startSeconds:cur.ts}); }catch(e){}
+    try{ if(cur.videoId) p.cueVideoById({videoId:cur.videoId, startSeconds:cur.ts}); }catch(e){} // 자동재생 X — 🔊 버튼으로
     /* playing 은 onStateChange 가 실제 재생 상태로 설정 (자동재생 차단 대비) */ };
 
   // 숨긴 YouTube 플레이어 1회 생성 (오디오만 — 정답 전엔 영상이 안 보이게)
@@ -877,9 +877,10 @@ function ReviewMode({cards,sourceLabel,nextDue,onExit,onGrade}){
       {sourceLabel && <div className="rv-src">복습 중: {sourceLabel}</div>}
       <div className="rv-card">
         {!revealed ? <>
-          <button className="rv-play" onClick={()=>{ if(playing){ try{playerRef.current&&playerRef.current.pauseVideo();}catch(e){} setPlaying(false); } else replay(); }}>{playing?"❚❚":"▶"}</button>
-          <div className="rv-seg">{fmt(t==null?cur.ts:t)} · 원본 구간 듣기</div>
-          <div className="rv-q">뭐라고 했을까요? 떠올려 보세요</div>
+          <div className="rv-hw">{cur.text}</div>
+          <span className={"badge rv-badge "+(cur.type==="word"?"b-word":cur.type==="phrase"?"b-phrase":"b-sent")}>{cur.type==="word"?"단어":cur.type==="phrase"?"구문":"문장"}</span>
+          <div className="rv-q">뜻을 떠올려 보세요</div>
+          <button className="rv-play" onClick={()=>{ if(playing){ try{playerRef.current&&playerRef.current.pauseVideo();}catch(e){} setPlaying(false); } else replay(); }}>{playing?"❚❚ 듣는 중":"🔊 맥락 듣기"}</button>
           <button className="rv-show" onClick={()=>setRevealed(true)}>정답 보기</button>
         </> : <>
           <div className="rv-hw">{cur.text}</div>
@@ -888,7 +889,7 @@ function ReviewMode({cards,sourceLabel,nextDue,onExit,onGrade}){
           {cur.en && <div className="rv-en">{cur.en}</div>}
           <div className="rv-ctx">{(()=>{const lo=cur.sentence.toLowerCase(),tl=cur.text.toLowerCase(),i=lo.indexOf(tl);
             return i<0?cur.sentence:<>{cur.sentence.slice(0,i)}<mark>{cur.sentence.slice(i,i+cur.text.length)}</mark>{cur.sentence.slice(i+cur.text.length)}</>;})()}</div>
-          <button className="rv-replay" onClick={replay}>↻ 원본 구간 다시 듣기</button>
+          <button className="rv-replay" onClick={replay}>↻ 맥락 다시 듣기</button>
           <div className="rv-rate">
             <button className="rv-again" onClick={()=>rate("again")}>다시</button>
             <button className="rv-soso" onClick={()=>rate("soso")}>애매</button>
