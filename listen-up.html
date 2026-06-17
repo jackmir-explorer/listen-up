@@ -593,9 +593,8 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
   const [time,setTime]=useState(initialTime!=null?initialTime:(clip.pos||0));
   const [playing,setPlaying]=useState(false);
   const [speed,setSpeed]=useState(1);
-  const [loop,setLoop]=useState(false);
-  const loopRange=useRef(null);
   const [tab,setTab]=useState("vocab");
+  const panelRef=useRef(null);   // 어휘 패널 바로가기 스크롤용
   const [vocab,setVocab]=useState(clip.vocab);
   const [marks,setMarks]=useState(clip.marks);
   const [phraseMode,setPhraseMode]=useState(false);
@@ -650,35 +649,29 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
       if(ytBoxRef.current) ytBoxRef.current.innerHTML=""; };
   },[clip.id]);
 
-  /* 재생 중에는 플레이어의 현재시간을 폴링해 time 갱신 + 구간 반복 처리 */
+  /* 재생 중에는 플레이어의 현재시간을 폴링해 time 갱신 */
   useEffect(()=>{
     if(!playing) return;
     const iv=setInterval(()=>{
       const p=playerRef.current; if(!p||!p.getCurrentTime) return;
-      let t=p.getCurrentTime();
-      if(loop&&loopRange.current&&t>=loopRange.current.end){ try{p.seekTo(loopRange.current.start,true);}catch(e){} t=loopRange.current.start; }
-      setTime(t);
+      setTime(p.getCurrentTime());
     },200);
     return ()=>clearInterval(iv);
-  },[playing,loop]);
+  },[playing]);
 
   const flash=m=>{ setToast(m); clearTimeout(toastT.current); toastT.current=setTimeout(()=>setToast(""),1500); };
   const seek=s=>{ setTime(s); try{ playerRef.current && playerRef.current.seekTo(s,true); }catch(e){} };
   const cur=()=>({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays});
   const save=()=>onClose({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays+(time>2?1:0)});
 
-  const toggleLoop=()=>{
-    if(!loop){ const l=TX[curIdx>=0?curIdx:0]; loopRange.current={start:l.start,end:l.end};
-      setLoop(true); flash("구간 반복 · "+fmt(l.start)+"–"+fmt(l.end)); }
-    else{ loopRange.current=null; setLoop(false); }
-  };
   const cycleSpeed=()=>{ const seq=[0.75,1,1.25,1.5]; const ns=seq[(seq.indexOf(speed)+1)%seq.length];
     setSpeed(ns); try{ playerRef.current && playerRef.current.setPlaybackRate(ns); }catch(e){} };
+  const goVocab=()=>{ setTab("vocab"); try{ panelRef.current && panelRef.current.scrollIntoView({behavior:"smooth",block:"start"}); }catch(e){} };
 
   /* 저장: 카드 먼저 띄우고(optimistic) → analyze 비동기 → 결과 채움 */
   const addVocab=async (type,text,li)=>{
     const id=uid();
-    setVocab(v=>[{id,type,text,sentence:TX[li].text,ts:TX[li].start,ko:"",en:"",tag:"",loading:true},...v]);
+    setVocab(v=>[{id,type,text,sentence:TX[li].text,ts:TX[li].start,te:TX[li].end,ko:"",en:"",tag:"",loading:true},...v]);
     setTab("vocab");
     flash((type==="word"?"단어":type==="phrase"?"구문":"문장")+" 저장 · 분석 중…");
     const a=await analyze(text,type);
@@ -707,7 +700,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
   const bookmarkSeg=()=>{ const l=TX[curIdx>=0?curIdx:0];
     setMarks(m=>[{id:uid(),start:l.start,end:l.end,label:l.text,note:""},...m]);
     setTab("bookmark"); flash("책갈피 · "+fmt(l.start)+"–"+fmt(l.end)); };
-  const playSeg=(s,e)=>{ loopRange.current={start:s,end:e}; setLoop(true); seek(s);
+  const playSeg=(s)=>{ seek(s);
     try{ playerRef.current && playerRef.current.playVideo(); }catch(e){} setPlaying(true); };
 
   return (
@@ -725,7 +718,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
           <div className="ctrl">
             <span className="pill" onClick={cycleSpeed}>{speed.toFixed(2).replace(/0$/,"")}x</span>
             <span className="sep"></span>
-            <span className={"pill"+(loop?" on":"")} onClick={toggleLoop}>↻ 구간 반복</span>
+            <span className="pill" onClick={goVocab}>📒 어휘 {vocab.length}</span>
             <span className="sep"></span>
             <span className="pill" onClick={bookmarkSeg}>🔖 책갈피</span>
             <span className="sep"></span>
@@ -758,7 +751,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
             ))}
           </div>
         </div>
-        <div className="card panel">
+        <div className="card panel" ref={panelRef}>
           <div className="tabs">
             <div className={tab==="vocab"?"on":""} onClick={()=>setTab("vocab")}>어휘<span className="cnt">{vocab.length}</span></div>
             <div className={tab==="bookmark"?"on":""} onClick={()=>setTab("bookmark")}>책갈피<span className="cnt">{marks.length}</span></div>
@@ -774,7 +767,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
               {marks.map(m=>(
                 <div className="item" key={m.id}>
                   <span className="x" onClick={()=>setMarks(v=>v.filter(x=>x.id!==m.id))}>✕</span>
-                  <div className="hd"><span className="ts2" onClick={()=>playSeg(m.start,m.end)}>▶ {fmt(m.start)}–{fmt(m.end)}</span></div>
+                  <div className="hd"><span className="ts2" onClick={()=>playSeg(m.start)}>▶ {fmt(m.start)}–{fmt(m.end)}</span></div>
                   <div className="ctx">{m.label}</div>
                   <input style={{width:"100%",fontSize:"11px",border:"1px solid var(--border)",borderRadius:"6px",padding:"4px 7px",fontFamily:"inherit",color:"var(--text)",background:"#fff"}}
                     placeholder="메모 (예: th 발음, 못 알아들음)" value={m.note}
@@ -810,9 +803,12 @@ function ReviewMode({cards,sourceLabel,onExit}){
   const playerRef=useRef(null);
   const ytBoxRef=useRef(null);
 
-  // 현재 카드 구간(ts ~ ts+5초)을 실제 영상으로 로드·재생 (videoId 없으면 무음)
+  // 현재 카드의 "정답 문장 전체"를 재생 (te 있으면 그 끝까지, 없으면 문장 길이로 추정)
   const loadSeg=()=>{ const p=playerRef.current; if(!p||!cur) return;
-    segEnd.current=cur.ts+5; setT(cur.ts);
+    const words=(cur.sentence||"").split(/\s+/).filter(Boolean).length;
+    const est=Math.min(16, Math.max(4, words*0.42));
+    const end=(cur.te && cur.te>cur.ts) ? cur.te : cur.ts+est;
+    segEnd.current=end+0.4; setT(cur.ts);   // 끝 단어 안 잘리게 약간 여유
     try{ if(cur.videoId) p.loadVideoById({videoId:cur.videoId, startSeconds:cur.ts}); }catch(e){}
     /* playing 은 onStateChange 가 실제 재생 상태로 설정 (자동재생 차단 대비) */ };
 
