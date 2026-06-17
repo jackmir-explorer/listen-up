@@ -589,7 +589,7 @@ function loadYouTubeAPI(){
   return _ytApiPromise;
 }
 
-function Study({clip,initialTime,onClose,onReview,onNav}){
+function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
   const [time,setTime]=useState(initialTime!=null?initialTime:(clip.pos||0));
   const [playing,setPlaying]=useState(false);
   const [speed,setSpeed]=useState(1);
@@ -619,6 +619,9 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
     const delta=(l.top-b.top)-(box.clientHeight/2 - line.clientHeight/2);
     box.scrollTo({top:box.scrollTop+delta, behavior:"smooth"});
   },[curIdx]);
+
+  // 어휘·책갈피가 바뀌면 즉시 라이브러리에 반영 (학습 중 앱을 바로 꺼도 안 사라지게)
+  useEffect(()=>{ if(onPersist) onPersist({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays}); },[vocab,marks]);
 
   /* 실제 YouTube IFrame 플레이어 — 마운트 시 생성해 clip.id 영상을 로드.
      (React 충돌 방지를 위해 ytBox 안에 host div 를 직접 만들어 YT 가 교체하게 함) */
@@ -1312,7 +1315,7 @@ function App(){
   else if(screen==="browse") view=<Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
   else if(screen==="review") view=<ReviewMode cards={review.cards} sourceLabel={review.label} onExit={exitReview}/>;
   else if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
-    view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
+    view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip} onPersist={persist}
       onNav={(s,upd)=>{ if(s==="study")return; persist(upd);
         if(s==="settings")setSyncOpen(true);
         else if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
