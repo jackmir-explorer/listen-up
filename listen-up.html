@@ -20,15 +20,17 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
     line-height:1.6;-webkit-font-smoothing:antialiased;}
   .app{max-width:1080px;margin:0 auto;padding:14px;}
-  .topbar{display:flex;align-items:center;gap:14px;padding:8px 12px;background:var(--surface);
-    border:1px solid var(--border);border-radius:12px;margin-bottom:12px;flex-wrap:wrap;}
-  .brand{font-size:14px;font-weight:600;letter-spacing:-.01em;}
-  .modepill{font-size:10px;color:var(--muted);background:var(--bg);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;}
-  .nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap;}
-  .nav span{font-size:12px;color:var(--muted);padding:5px 10px;border-radius:8px;cursor:pointer;}
-  .nav span.navset{font-size:15px;padding:5px 8px;}
+  .topbar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface);
+    border:1px solid var(--border);border-radius:12px;margin-bottom:12px;flex-wrap:nowrap;}
+  .brand{font-size:14px;font-weight:600;letter-spacing:-.01em;flex:none;}
+  .modepill{font-size:10px;color:var(--muted);background:var(--bg);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;flex:none;}
+  .nav{display:flex;gap:4px;flex:1;min-width:0;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;}
+  .nav::-webkit-scrollbar{display:none;}
+  .nav span{font-size:12px;color:var(--muted);padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;flex:none;}
   .nav span.on{color:var(--info);background:var(--info-bg);}
   .nav span:hover:not(.on){background:var(--bg);}
+  .navset{flex:none;font-size:17px;color:var(--muted);padding:4px 7px;border-radius:8px;cursor:pointer;}
+  .navset:hover{background:var(--bg);}
   .lib-head{display:flex;align-items:baseline;justify-content:space-between;margin:4px 2px 12px;}
   .lib-head h2{font-size:17px;font-weight:600;margin:0;}
   .lib-head .sub{font-size:12px;color:var(--muted);}
@@ -482,8 +484,8 @@ function Top({screen,onNav}){
         <span className={screen==="study"?"on":""} onClick={()=>onNav("study")}>학습</span>
         <span className={screen==="browse"?"on":""} onClick={()=>onNav("browse")}>모아보기</span>
         <span onClick={()=>onNav("review")}>복습</span>
-        <span className="navset" title="설정·동기화" onClick={()=>onNav("settings")}>⚙</span>
       </div>
+      <span className="navset" title="설정·동기화" onClick={()=>onNav("settings")}>⚙</span>
     </div>
   );
 }
