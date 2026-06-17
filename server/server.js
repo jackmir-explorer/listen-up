@@ -63,7 +63,7 @@ app.post("/api/analyze", async (req, res) => {
   // 키 검증 (요청 헤더 또는 .env)
   const apiKey = resolveKey(req);
   const ke = keyError(apiKey);
-  if (ke) return res.status(401).json({ error: ke, ko: "", en: "", tag: "" });
+  if (ke) { console.error("analyze 키 거부:", ke, "(헤더 키 길이:", (req.header("x-anthropic-key") || "").length, ")"); return res.status(401).json({ error: ke, ko: "", en: "", tag: "" }); }
 
   try {
     const anthropic = new Anthropic({ apiKey });
