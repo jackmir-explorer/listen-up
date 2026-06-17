@@ -102,20 +102,32 @@ export function extractVideoId(input) {
   return m ? m[1] : null;
 }
 
+// oEmbed 폴백 — getBasicInfo 의 player 엔드포인트가 막힌 IP(클라우드/데이터센터)에서도
+// 제목/채널은 공개 oEmbed 로 받을 수 있다(길이는 안 줌 → total 0). 영상 재생은
+// 클라이언트(주거망)의 iframe 플레이어가 하므로 메타만 있으면 추가/학습엔 충분하다.
+async function viaOembed(id) {
+  const url = "https://www.youtube.com/oembed?format=json&url=" +
+    encodeURIComponent("https://www.youtube.com/watch?v=" + id);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("oembed " + res.status);
+  const j = await res.json();
+  const title = j.title || id;
+  return { id, title, channel: j.author_name || "", level: guessLevel(title), topics: [], total: 0 };
+}
+
 // ── 직접 import: URL/ID 로 영상 메타데이터 1건 반환 (검색 결과와 같은 모양) ──
 export async function getVideoMeta(input) {
   const id = extractVideoId(input);
   if (!id) return null;
-  const yt = await getYt();
-  const info = await yt.getBasicInfo(id);
-  const bi = (info && info.basic_info) || {};
-  const title = bi.title || id;
-  return {
-    id,
-    title,
-    channel: bi.author || "",
-    level: guessLevel(title),
-    topics: [],
-    total: bi.duration || 0,
-  };
+  // 1) getBasicInfo(player API) — 길이까지 받지만 일부 IP(클라우드)에선 403 으로 막힘
+  try {
+    const yt = await getYt();
+    const info = await yt.getBasicInfo(id);
+    const bi = (info && info.basic_info) || {};
+    const title = bi.title || id;
+    return { id, title, channel: bi.author || "", level: guessLevel(title), topics: [], total: bi.duration || 0 };
+  } catch (e) {
+    // 2) oEmbed 폴백 (player 차단 시) — 제목/채널만, 길이는 0
+    return await viaOembed(id);
+  }
 }
