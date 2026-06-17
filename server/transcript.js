@@ -146,26 +146,51 @@ export async function debugTranscript(videoId) {
   return result;
 }
 
-// 잘게 쪼개진 자막을 문장 단위로 합침: 문장부호(. ! ?)에서 끊되, 부호가 없으면
-// 너무 길어지지 않게 ~14초/220자에서 끊는다. (구문 선택이 한 줄 안에서 되도록)
+// 흔한 약어 — 뒤 마침표를 문장 끝으로 오인하지 않도록 제외.
+const ABBR = /(?:^|\b)(mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|e\.g|i\.e|a\.m|p\.m|u\.s|u\.k)\.?$/i;
+function isSentenceEnd(word) {
+  if (!/[.!?]["'”’)\]]*$/.test(word)) return false;
+  const core = word.replace(/["'”’)\]]*$/, "");
+  if (/^\d+\.$/.test(core)) return false; // 숫자. (소수·번호)
+  if (ABBR.test(core)) return false;      // 약어
+  return true;
+}
+
+// 세그먼트를 단어 단위 타임스탬프로 펼친 뒤 문장부호(. ! ?) 기준으로 문장 단위로 묶는다.
+// 문장부호가 없으면(자동 자막 등) 적당한 길이/시간에서 끊어 너무 길지 않게 한다.
 function regroupSentences(segs) {
-  const out = [];
-  let cur = null;
-  const flush = () => {
-    if (cur) {
-      const text = cur.text.replace(/\s+/g, " ").trim();
-      if (text) out.push({ start: round2(cur.start), end: round2(cur.end), text });
-    }
-    cur = null;
-  };
+  // 1) 단어 단위로 펼치며 각 단어에 시간 부여(세그먼트 내 균등 분배)
+  const words = [];
   for (const s of segs) {
-    if (!cur) cur = { start: s.start, end: s.end, text: s.text };
-    else { cur.end = s.end; cur.text += " " + s.text; }
-    const t = cur.text.trim();
-    const endsSentence = /[.!?]["'”’)\]]?$/.test(t);
-    const tooLong = cur.end - cur.start >= 14 || t.length >= 220;
-    if (endsSentence || tooLong) flush();
+    const ws = String(s.text).split(/\s+/).filter(Boolean);
+    if (!ws.length) continue;
+    const span = Math.max(0, (Number(s.end) || s.start) - s.start);
+    ws.forEach((w, i) => words.push({ w, t: s.start + (ws.length > 1 ? (span * i) / ws.length : 0) }));
   }
-  flush();
+  if (!words.length) return [];
+
+  // 2) 단어를 모아 문장(또는 적당 길이) 단위로 flush
+  const out = [];
+  let buf = [];
+  let startT = words[0].t;
+  const flush = (endT) => {
+    const text = buf.join(" ").replace(/\s+/g, " ").trim();
+    if (text) out.push({ start: round2(startT), end: round2(endT), text });
+    buf = [];
+  };
+  for (let i = 0; i < words.length; i++) {
+    const { w, t } = words[i];
+    if (!buf.length) startT = t;
+    buf.push(w);
+    const len = buf.reduce((n, x) => n + x.length + 1, 0);
+    const dur = t - startT;
+    const nextT = i + 1 < words.length ? words[i + 1].t : t;
+    const clause = /[,;:]["'”’)\]]*$/.test(w);
+    // 우선순위: 문장 끝 → (길면)절 끊기 → 강제 한도
+    if (isSentenceEnd(w) || (len >= 100 && clause) || len >= 150 || dur >= 11) {
+      flush(nextT);
+    }
+  }
+  if (buf.length) flush(words[words.length - 1].t);
   return out;
 }
