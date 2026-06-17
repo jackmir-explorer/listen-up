@@ -468,7 +468,7 @@ const LEVEL_KO_TO_CEFR=["A2","B1","C1"];
 
 const fmt=s=>{ s=Math.max(0,Math.floor(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
 const clean=t=>t.replace(/^[^A-Za-z'’-]+|[^A-Za-z'’-]+$/g,"");
-let _id=1000; const uid=()=>_id++;
+let _seq=0; const uid=()=>Date.now().toString(36)+(_seq++).toString(36); // 새로고침에도 전역 고유
 
 /* ════════════════════════════════════════════════════════
    UI COMPONENTS
@@ -1081,10 +1081,19 @@ function Browse({clips,onNav,onOpenAt}){
 /* ── 로컬 영속화: 라이브러리(clips)를 localStorage 에 저장·복원 ──
    study-app 방식(단일 파일 + localStorage). 기기 간 백업은 아래 Gist 동기화로 확장됨. */
 const STORE_KEY = "listen-up.library.v1";
+// 과거 버그(uid 카운터 리셋)로 생긴 중복 id 를 로드 시 정리 — 복습 누락 방지.
+function dedupeIds(clips){
+  const seen=new Set();
+  for(const c of (clips||[])){
+    for(const v of (c.vocab||[])){ if(v.id==null||seen.has(v.id)) v.id=uid(); seen.add(v.id); }
+    for(const m of (c.marks||[])){ if(m.id==null||seen.has(m.id)) m.id=uid(); seen.add(m.id); }
+  }
+  return clips;
+}
 function loadClips(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
-    if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return v; }
+    if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return dedupeIds(v); }
   }catch(e){ console.error("library load 실패:", e); }
   return seedClips();            // 저장된 게 없으면 시드(예시) 라이브러리
 }
@@ -1251,7 +1260,7 @@ function App(){
       try{
         const remote=await gistPull();
         if(remote && remote.updatedAt>localTS()){
-          skipPush.current=true; setClips(remote.clips); saveClips(remote.clips);
+          skipPush.current=true; setClips(dedupeIds(remote.clips)); saveClips(remote.clips);
           localStorage.setItem(TS_KEY,String(remote.updatedAt));
           setSync({state:"ok",msg:"내려받음"});
         }else{
@@ -1281,7 +1290,7 @@ function App(){
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
   const pullNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"불러오는 중…"});
     try{ const r=await gistPull();
-      if(r){ skipPush.current=true; setClips(r.clips); saveClips(r.clips);
+      if(r){ skipPush.current=true; setClips(dedupeIds(r.clips)); saveClips(r.clips);
         localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
       else setSync({state:"ok",msg:"원격 비어있음"}); }
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
@@ -1289,7 +1298,7 @@ function App(){
     if(!t){ setSync({state:"idle",msg:""}); return; }
     setSync({state:"syncing",msg:"연결 중…"});
     try{ const r=await gistPull();
-      if(r && r.updatedAt>localTS()){ skipPush.current=true; setClips(r.clips); saveClips(r.clips);
+      if(r && r.updatedAt>localTS()){ skipPush.current=true; setClips(dedupeIds(r.clips)); saveClips(r.clips);
         localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
       else { await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
       syncedOnce.current=true;
