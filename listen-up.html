@@ -26,6 +26,7 @@
   .modepill{font-size:10px;color:var(--muted);background:var(--bg);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;}
   .nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap;}
   .nav span{font-size:12px;color:var(--muted);padding:5px 10px;border-radius:8px;cursor:pointer;}
+  .nav span.navset{font-size:15px;padding:5px 8px;}
   .nav span.on{color:var(--info);background:var(--info-bg);}
   .nav span:hover:not(.on){background:var(--bg);}
   .lib-head{display:flex;align-items:baseline;justify-content:space-between;margin:4px 2px 12px;}
@@ -177,14 +178,14 @@
   .resmeta{font-size:10.5px;color:var(--hint);}
   .nores{text-align:center;color:var(--hint);font-size:13px;padding:36px 20px;}
   /* Gist 동기화 위젯 */
-  .sync-fab{position:fixed;right:14px;bottom:14px;z-index:50;display:flex;align-items:center;gap:6px;
+  .sync-fab{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:900;display:flex;align-items:center;gap:6px;
     padding:7px 11px;border-radius:999px;border:1px solid var(--border2);background:var(--surface);
     color:var(--text);font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.08);}
   .sync-dot{width:8px;height:8px;border-radius:50%;background:#b9b7af;display:inline-block;}
   .sync-dot.s-ok{background:#3a9d5d;} .sync-dot.s-error{background:#cf4b4b;}
   .sync-dot.s-syncing,.sync-dot.s-dirty{background:#d99a2b;}
   .sync-msg{font-size:11px;color:var(--muted);}
-  .sync-modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.32);display:flex;
+  .sync-modal{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.32);display:flex;
     align-items:center;justify-content:center;padding:18px;}
   .sync-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
     width:100%;max-width:360px;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.2);}
@@ -478,6 +479,7 @@ function Top({screen,onNav}){
         <span className={screen==="study"?"on":""} onClick={()=>onNav("study")}>학습</span>
         <span className={screen==="browse"?"on":""} onClick={()=>onNav("browse")}>모아보기</span>
         <span onClick={()=>onNav("review")}>복습</span>
+        <span className="navset" title="설정·동기화" onClick={()=>onNav("settings")}>⚙</span>
       </div>
     </div>
   );
@@ -598,8 +600,20 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
   const toastT=useRef();
   const playerRef=useRef(null);   // YT.Player 인스턴스
   const ytBoxRef=useRef(null);    // 플레이어가 들어갈 div
+  const txBoxRef=useRef(null);    // 대본 스크롤 컨테이너
+  const curLineRef=useRef(null);  // 현재 재생 줄
   const TX=clip.transcript, TOTAL=clip.total;
   const curIdx=TX.findIndex(l=>time>=l.start && time<l.end);
+
+  // 영상 흐름 따라 현재 줄 자동 스크롤 (화면 밖으로 나갈 때만 가운데로 — 수동 스크롤 방해 최소화)
+  useEffect(()=>{
+    const box=txBoxRef.current, line=curLineRef.current;
+    if(!box||!line||curIdx<0) return;
+    const b=box.getBoundingClientRect(), l=line.getBoundingClientRect();
+    if(l.top>=b.top && l.bottom<=b.bottom) return; // 이미 보이면 그대로
+    const delta=(l.top-b.top)-(box.clientHeight/2 - line.clientHeight/2);
+    box.scrollTo({top:box.scrollTop+delta, behavior:"smooth"});
+  },[curIdx]);
 
   /* 실제 YouTube IFrame 플레이어 — 마운트 시 생성해 clip.id 영상을 로드.
      (React 충돌 방지를 위해 ytBox 안에 host div 를 직접 만들어 YT 가 교체하게 함) */
@@ -701,12 +715,12 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
             <span className="sep"></span>
             <span className={"pill"+(phraseMode?" on":"")} onClick={()=>{setPhraseMode(m=>!m);setAnchor(null);}}>구문 잡기</span>
           </div>
-          <div className={"hintbar"+(phraseMode?" active":"")}>
-            {phraseMode
-              ? (anchor?"끝 단어를 탭하세요 (같은 문장 안)":"시작 단어를 탭하세요 · 버튼 다시 누르면 취소")
-              : (<><span className="kbd">단어 탭</span> 단어 · <span className="kbd">구문 잡기 → 두 단어</span> 구문 · <span className="kbd">🔖</span> 문장</>)}
-          </div>
-          <div className="tx">
+          {phraseMode && (
+            <div className="hintbar active">
+              {anchor?"끝 단어를 탭하세요 (같은 문장 안)":"시작 단어를 탭하세요 · 버튼 다시 누르면 취소"}
+            </div>
+          )}
+          <div className="tx" ref={txBoxRef}>
             {TX.length===0 && (
               <div className="tx-empty">
                 이 영상의 자막을 못 받았어요. YouTube 가 클라우드 서버 IP 의 자막 요청을 막기 때문이에요.<br/>
@@ -714,7 +728,7 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
               </div>
             )}
             {TX.map((l,li)=>(
-              <div key={li} className={"ln"+(li===curIdx?" cur":"")}>
+              <div key={li} ref={li===curIdx?curLineRef:null} className={"ln"+(li===curIdx?" cur":"")}>
                 <span className="ts" onClick={()=>seek(l.start)}>{fmt(l.start)}</span>
                 <p>
                   {l.text.split(/\s+/).map((tok,wi)=>{
@@ -1265,7 +1279,8 @@ function App(){
     else window.alert("영상을 가져오지 못했어요. YouTube 링크 또는 영상 ID를 확인해 주세요.");
   };
 
-  const navTop=s=>{ if(s==="search")setScreen("search"); else if(s==="library")setScreen("library");
+  const navTop=s=>{ if(s==="settings"){setSyncOpen(true);return;}
+    if(s==="search")setScreen("search"); else if(s==="library")setScreen("library");
     else if(s==="browse")setScreen("browse"); else if(s==="review")reviewAll();
     else if(s==="study"&&openId)setScreen("study"); };
 
@@ -1276,7 +1291,8 @@ function App(){
   else if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
     view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip}
       onNav={(s,upd)=>{ if(s==="study")return; persist(upd);
-        if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
+        if(s==="settings")setSyncOpen(true);
+        else if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
         else if(s==="review")reviewClip(upd); else { setOpenId(null); setScreen("library"); } }}/>; }
   else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
   return <>{view}
