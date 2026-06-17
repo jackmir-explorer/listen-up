@@ -531,7 +531,7 @@ function Library({clips,onOpen,onSearch,onNav,onRemove}){
   );
 }
 
-function VocabCard({it,onSeek,onRemove,onTag}){
+function VocabCard({it,onSeek,onRemove,onTag,onReanalyze}){
   const [open,setOpen]=useState(false);
   const [editing,setEditing]=useState(false);
   const lo=it.sentence.toLowerCase(), tl=it.text.toLowerCase(), i=lo.indexOf(tl);
@@ -568,7 +568,7 @@ function VocabCard({it,onSeek,onRemove,onTag}){
       </div>
       {open && !it.loading && <div className="meaning">
         {it.ko?<><div className="ko">{it.ko}</div>{it.en && <div className="en">{it.en}</div>}</>
-          :<div className="ph">뜻 없음 (analyze 결과 비어 있음)</div>}
+          :<div className="ph">뜻 없음 · <span className="reveal" onClick={()=>onReanalyze&&onReanalyze(it)}>다시 분석</span></div>}
       </div>}
     </div>
   );
@@ -684,6 +684,14 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
       flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 자동 분석돼요");
   };
   const setTag=(id,tag)=>setVocab(v=>v.map(x=>x.id===id?{...x,tag}:x));
+  // 빈 분석 다시 시도 (키 설정 후 등)
+  const reanalyze=async it=>{
+    setVocab(v=>v.map(x=>x.id===it.id?{...x,loading:true}:x));
+    const a=await analyze(it.text,it.type);
+    setVocab(v=>v.map(x=>x.id===it.id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
+    if(USE_BACKEND && !getAnthropicKey() && !a.ko && !a.en && !a.tag)
+      flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 분석돼요");
+  };
   const onWord=(li,wi,tok)=>{
     if(phraseMode){
       if(!anchor){ setAnchor({li,wi}); return; }
@@ -755,7 +763,7 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
           {tab==="vocab" ? (
             <div className="list">
               {vocab.length===0 && <div className="empty">대본의 단어를 탭하면<br/>문장·기능태그와 함께 쌓입니다</div>}
-              {vocab.map(it=><VocabCard key={it.id} it={it} onSeek={seek} onRemove={id=>setVocab(v=>v.filter(x=>x.id!==id))} onTag={setTag}/>)}
+              {vocab.map(it=><VocabCard key={it.id} it={it} onSeek={seek} onRemove={id=>setVocab(v=>v.filter(x=>x.id!==id))} onTag={setTag} onReanalyze={reanalyze}/>)}
             </div>
           ) : (
             <div className="list">
