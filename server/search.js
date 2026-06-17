@@ -45,39 +45,53 @@ const LEVEL_HINTS = [
   "advanced in-depth lecture",       // 4 고급
 ];
 
-export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topics = [] } = {}) {
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// topicsEn: 상위(서버 라우트)에서 한글 토픽을 영어로 번역해 넘겨준 값(있으면 우선).
+// page: "다른 결과 보기" 누를수록 커지며 더 깊은 검색 페이지를 본다.
+export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, page = 0 } = {}) {
   const yt = await getYt();
-  const topicsEn = (topics || []).map((t) => TOPIC_EN[t] || t);
+  const enTopics = (topicsEn && topicsEn.length ? topicsEn : (topics || []).map((t) => TOPIC_EN[t] || t)).filter(Boolean);
   const hint = LEVEL_HINTS[Math.max(0, Math.min(LEVEL_HINTS.length - 1, level | 0))] || "";
-  const parts = [...topicsEn, hint].filter(Boolean);
+  const parts = [...enTopics, hint].filter(Boolean);
   const query = parts.length ? parts.join(" ") : "english podcast interview";
 
-  // 자막(CC) 있는 영상만 — YouTube 검색의 subtitles 필터. (듣기 학습엔 자막이 필수)
-  let search;
+  // 자막(CC) 필터 검색 → 여러 페이지 수집(다양화). page 가 커지면 앞부분을 건너뛰고 더 깊이 본다.
+  let p;
   try {
-    search = await yt.search(query, { type: "video", features: ["subtitles"] });
+    p = await yt.search(query, { type: "video", features: ["subtitles"] });
   } catch {
-    search = await yt.search(query, { type: "video" }); // 필터 미지원/오류 시 일반 검색으로 폴백
+    p = await yt.search(query, { type: "video" }); // 필터 미지원/오류 시 일반 검색으로 폴백
   }
-  const nodes = (search.results || search.videos || []).filter(
-    (v) => (v?.id || v?.video_id) && v?.duration?.seconds
-  );
+  const skip = Math.max(0, page | 0) * 2; // 페이지마다 2단계씩 더 깊이
+  const take = 3;                          // 한 번에 3페이지 분량 수집
+  const raw = [];
+  for (let i = 0; i < skip + take; i++) {
+    if (i >= skip) for (const v of p.videos || []) raw.push(v);
+    if (!p.has_continuation) break;
+    try { p = await p.getContinuation(); } catch { break; }
+  }
 
-  return nodes
-    .map((v) => {
-      const title = v.title?.text ?? String(v.title ?? "");
-      return {
-        id: v.id || v.video_id,
-        title,
-        channel: v.author?.name ?? "",
-        level: guessLevel(title), // 제목에 CEFR 표기가 있으면 배지로 표시(보너스)
-        topics: topics || [],
-        total: v.duration?.seconds ?? 0,
-      };
-    })
-    .filter((r) => r.id && r.title)
-    .filter((r) => !NOSPEECH.test(r.title)) // 무발화 콘텐츠 제외
-    .filter((r) => r.total >= minSec && r.total <= maxSec);
+  // 중복 제거 + 메타 변환 + 필터
+  const seen = new Set();
+  const out = [];
+  for (const v of raw) {
+    const id = v?.id || v?.video_id;
+    if (!id || seen.has(id) || !v?.duration?.seconds) continue;
+    seen.add(id);
+    const title = v.title?.text ?? String(v.title ?? "");
+    if (!title || NOSPEECH.test(title)) continue;       // 무발화 콘텐츠 제외
+    const total = v.duration?.seconds ?? 0;
+    if (total < minSec || total > maxSec) continue;
+    out.push({ id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total });
+  }
+  return shuffle(out); // 순서 섞어 매번 같은 줄세움 방지
 }
 
 // ── URL/ID 에서 11자리 영상 ID 추출 ──

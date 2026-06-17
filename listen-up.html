@@ -171,6 +171,8 @@
   .range input[type=range]{flex:1;min-width:80px;}
   .rdo{font-size:12px;color:var(--info);font-weight:600;min-width:74px;text-align:right;font-variant-numeric:tabular-nums;}
   .chip{font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--border2);background:var(--surface);cursor:pointer;color:var(--text);user-select:none;}
+  .chip .chip-x{margin-left:6px;opacity:.45;font-weight:700;}
+  .chip .chip-x:hover{opacity:1;color:#cf4b4b;}
   .chip.on{background:var(--info-bg);border-color:var(--info-bd);color:var(--info);}
   .addbtn{font-size:11.5px;font-weight:600;padding:5px 13px;border-radius:8px;border:1px solid var(--info-bd);background:var(--info-bg);color:var(--info);cursor:pointer;user-select:none;}
   .addbtn:hover{filter:brightness(.97);}
@@ -294,7 +296,8 @@ async function searchVideos(filters){
   if(USE_BACKEND){
     try{
       const res=await fetch(apiBase()+"/api/search",{method:"POST",
-        headers:{"Content-Type":"application/json"},body:JSON.stringify(filters)});
+        headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
+        body:JSON.stringify(filters)});
       if(!res.ok) throw new Error("search "+res.status);
       return await res.json();
     }catch(e){ console.error("search failed:",e); return []; }
@@ -737,7 +740,6 @@ function Study({clip,initialTime,onClose,onReview,onNav}){
                     const cls="w"+(mined?" mined":"")+(anchor&&anchor.li===li&&anchor.wi===wi?" anchor":"")+(pulse===k?" pulse":"");
                     return <React.Fragment key={wi}><span className={cls} onClick={()=>onWord(li,wi,tok)}>{tok}</span>{" "}</React.Fragment>;
                   })}
-                  <span className="bm" title="문장 저장" onClick={()=>addVocab("sentence",l.text,li)}>🔖</span>
                 </p>
               </div>
             ))}
@@ -889,22 +891,29 @@ function Search({existingIds,onAdd,onImport,onNav}){
   const [maxM,setMaxM]=useState(120);
   const [lvl,setLvl]=useState(2);
   const [topics,setTopics]=useState([]);
-  const [allTopics,setAllTopics]=useState(["여행","과학","일상","심리","자연·환경","요리"]);
+  const [allTopics,setAllTopics]=useState(()=>{ try{const s=JSON.parse(localStorage.getItem("listen-up.topics")); if(Array.isArray(s)&&s.length)return s;}catch(e){} return ["여행","과학","일상","심리","자연·환경","요리"]; });
   const [adding,setAdding]=useState(false);
   const [newTopic,setNewTopic]=useState("");
   const [results,setResults]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [page,setPage]=useState(0);
   const [addingId,setAddingId]=useState(null);
   const [importUrl,setImportUrl]=useState("");
   const [importing,setImporting]=useState(false);
-  // 필터 바뀔 때마다 비동기 검색
+  // 주제 목록 영속화(추가·삭제 유지)
+  useEffect(()=>{ try{localStorage.setItem("listen-up.topics",JSON.stringify(allTopics));}catch(e){} },[allTopics]);
+  // 필터 바뀌면 page 0 으로
+  useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics]);
+  // 검색 (필터·page 변동 시)
   useEffect(()=>{
     let alive=true; setLoading(true);
-    searchVideos({minSec:minM*60,maxSec:maxM*60,level:lvl,topics}).then(r=>{ if(alive){ setResults(r); setLoading(false); } });
+    searchVideos({minSec:minM*60,maxSec:maxM*60,level:lvl,topics,page}).then(r=>{ if(alive){ setResults(r); setLoading(false); } });
     return ()=>{ alive=false; };
-  },[minM,maxM,lvl,topics]);
+  },[minM,maxM,lvl,topics,page]);
 
   const toggle=t=>setTopics(ts=>ts.includes(t)?ts.filter(x=>x!==t):[...ts,t]);
+  const removeTopic=t=>{ setAllTopics(a=>a.filter(x=>x!==t)); setTopics(ts=>ts.filter(x=>x!==t)); };
+  const moreResults=()=>{ if(!loading) setPage(p=>p+1); };
   const setMin=v=>setMinM(Math.min(v,maxM));
   const setMax=v=>setMaxM(Math.max(v,minM));
   const addTopic=()=>{ const t=newTopic.trim();
@@ -943,7 +952,7 @@ function Search({existingIds,onAdd,onImport,onNav}){
         <div className="frow">
           <span className="flab">주제</span>
           <div style={{display:"flex",gap:"6px",flexWrap:"wrap",alignItems:"center"}}>
-            {allTopics.map(t=><span key={t} className={"chip"+(topics.includes(t)?" on":"")} onClick={()=>toggle(t)}>{t}</span>)}
+            {allTopics.map(t=><span key={t} className={"chip"+(topics.includes(t)?" on":"")} onClick={()=>toggle(t)}>{t}<span className="chip-x" title="주제 삭제" onClick={e=>{e.stopPropagation();removeTopic(t);}}>×</span></span>)}
             {adding
               ? <input autoFocus placeholder="주제 입력"
                   style={{width:"110px",height:"30px",fontSize:"12px",border:"1px solid var(--info-bd)",borderRadius:"8px",padding:"0 8px",fontFamily:"inherit"}}
@@ -977,6 +986,10 @@ function Search({existingIds,onAdd,onImport,onNav}){
                 );
               })}
             </div>}
+      {!loading && results.length>0 &&
+        <div style={{textAlign:"center",marginTop:"14px"}}>
+          <span className="addbtn" onClick={moreResults}>🔄 다른 결과 보기</span>
+        </div>}
       <div className="note-mock" style={{marginTop:"16px"}}>
         {USE_BACKEND?"백엔드 연동됨":"mock 모드 — searchVideos()·fetchTranscript() 가 백엔드 호출로 교체될 자리"}
       </div>

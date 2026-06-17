@@ -114,16 +114,49 @@ app.post("/api/transcript", async (req, res) => {
   }
 });
 
+// 한글 토픽 → 영어 검색어. 결과 캐시. 키 없으면(또는 영어면) 원문 그대로.
+const _topicCache = new Map();
+async function toEnglishTopics(topics, apiKey) {
+  const out = [];
+  for (const ko of topics) {
+    if (!/[가-힣]/.test(ko)) { out.push(ko); continue; } // 한글 없으면 그대로
+    if (_topicCache.has(ko)) { out.push(_topicCache.get(ko)); continue; }
+    if (keyError(apiKey)) { out.push(ko); continue; }            // 키 없으면 번역 불가 → 원문
+    try {
+      const anthropic = new Anthropic({ apiKey });
+      const msg = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 40,
+        system:
+          "Translate the Korean topic into a short English search keyword (1-3 words) for finding English-language listening/learning videos on YouTube. Reply with ONLY the keyword — no quotes, no punctuation, no explanation.",
+        messages: [{ role: "user", content: ko }],
+      });
+      const en = (msg.content.find((b) => b.type === "text")?.text || "").trim().replace(/^["'\s]+|["'\s]+$/g, "");
+      const val = en || ko;
+      _topicCache.set(ko, val);
+      out.push(val);
+    } catch (e) {
+      console.error("topic 번역 실패:", ko, "-", e?.message || e);
+      out.push(ko);
+    }
+  }
+  return out;
+}
+
 // ── POST /api/search ──────────────────────────────────────────────
-// body: { minSec, maxSec, maxLevel, topics[] } → [{ id, title, channel, level, topics, total }]
+// body: { minSec, maxSec, level, topics[], page } → [{ id, title, channel, level, topics, total }]
 app.post("/api/search", async (req, res) => {
   const f = req.body || {};
+  const topics = Array.isArray(f.topics) ? f.topics : [];
   try {
+    const topicsEn = await toEnglishTopics(topics, resolveKey(req)); // 한글 토픽을 영어로
     const results = await searchVideos({
       minSec: Number(f.minSec) || 0,
       maxSec: Number(f.maxSec) || 36000,
       level: Number.isInteger(f.level) ? f.level : 2,
-      topics: Array.isArray(f.topics) ? f.topics : [],
+      topics,        // 원본(표시용)
+      topicsEn,      // 영어(검색용)
+      page: Number(f.page) || 0,
     });
     return res.json(results);
   } catch (err) {
