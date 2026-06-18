@@ -275,6 +275,13 @@ function getAnthropicKey(){ return ANTHROPIC_KEY; }
 function setAnthropicKey(k){ ANTHROPIC_KEY=(k||"").trim();
   if(ANTHROPIC_KEY) localStorage.setItem("anthropic_key",ANTHROPIC_KEY); else localStorage.removeItem("anthropic_key"); }
 
+// Supadata 자막 API 키 — 클라우드(Render)에서도 자막을 받기 위한 키. ⚙ 설정에서 입력해
+// localStorage 에 보관, transcript 요청 헤더로 전달(코드·저장소엔 저장 안 됨).
+let SUPADATA_KEY = localStorage.getItem("supadata_key") || "";
+function getSupadataKey(){ return SUPADATA_KEY; }
+function setSupadataKey(k){ SUPADATA_KEY=(k||"").trim();
+  if(SUPADATA_KEY) localStorage.setItem("supadata_key",SUPADATA_KEY); else localStorage.removeItem("supadata_key"); }
+
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // POST /api/analyze   body:{ text, type:"word"|"phrase"|"sentence" }
@@ -314,7 +321,8 @@ async function fetchTranscript(videoId){
   if(USE_BACKEND){
     try{
       const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
-        headers:{"Content-Type":"application/json"},body:JSON.stringify({videoId})});
+        headers:{"Content-Type":"application/json", ...(SUPADATA_KEY?{"x-supadata-key":SUPADATA_KEY}:{})},
+        body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
       return await res.json();
     }catch(e){ console.error("transcript failed:",e); return []; }
@@ -1177,6 +1185,8 @@ async function gistPull(){
 /* 화면 위 떠 있는 ⚙ 설정 버튼 + 모달 (API 키 + Gist 동기화, 모든 화면 공통) */
 function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onDisconnect,onPush,onPull}){
   const [key,setKey]=useState("");
+  const [sdKey,setSdKey]=useState("");
+  const [sdHas,setSdHas]=useState(!!getSupadataKey());
   const [token,setToken]=useState("");
   const [api,setApi]=useState(getApiUrl());
   const [apiSaved,setApiSaved]=useState(false);
@@ -1202,6 +1212,18 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
             <button className="sync-btn primary" onClick={()=>{ onSaveKey(key.trim()); setKey(""); }}>저장</button>
             <a className="sync-link" href="https://console.anthropic.com/settings/keys"
               target="_blank" rel="noreferrer">키 발급하기 →</a>
+          </>}
+
+          <div className="sec-t" style={{marginTop:"18px"}}>Supadata 자막 키 <span className="muted">— 클라우드에서 자막 추출(선택)</span></div>
+          {sdHas ? <>
+            <p className="sync-p">상태: <b>입력됨 ✓</b> <span className="muted">— Render 등 클라우드에서도 자막이 추출됩니다.</span></p>
+            <button className="sync-btn danger" onClick={()=>{ setSupadataKey(""); setSdHas(false); }}>키 지우기</button>
+          </> : <>
+            <p className="sync-p">없어도 PC(터널) 백엔드에선 자막이 되지만, <b>클라우드 백엔드에서 자막을 받으려면</b> 필요합니다(무료 월 100건).</p>
+            <input className="sync-in" type="password" placeholder="Supadata API 키 붙여넣기"
+              value={sdKey} onChange={e=>setSdKey(e.target.value)}/>
+            <button className="sync-btn primary" onClick={()=>{ setSupadataKey(sdKey.trim()); setSdHas(!!getSupadataKey()); setSdKey(""); }}>저장</button>
+            <a className="sync-link" href="https://supadata.ai" target="_blank" rel="noreferrer">키 발급하기 (무료) →</a>
           </>}
 
           <div className="sec-t" style={{marginTop:"18px"}}>백엔드 서버 주소 <span className="muted">— Pages·모바일에서만 필요</span></div>

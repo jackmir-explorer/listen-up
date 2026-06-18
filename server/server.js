@@ -105,7 +105,8 @@ app.post("/api/transcript", async (req, res) => {
     return res.status(400).json({ error: "body 는 { videoId:string } 형식이어야 합니다." });
   }
   try {
-    const segments = await fetchTranscriptSegments(videoId.trim());
+    const supKey = (req.header("x-supadata-key") || "").trim();
+    const segments = await fetchTranscriptSegments(videoId.trim(), supKey);
     return res.json(segments);
   } catch (err) {
     // 자막 비활성/없음/추출 실패 → 빈 배열 (프런트가 빈 대본 UI 로 처리)

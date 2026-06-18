@@ -104,13 +104,57 @@ async function viaYoutubeTranscript(videoId) {
     .filter((s) => s.text);
 }
 
-// videoId(또는 URL)로 자막 세그먼트 반환. 모두 실패하면 throw.
-export async function fetchTranscriptSegments(videoId) {
+// 0) Supadata 자막 API — 클라우드(데이터센터 IP)에서도 동작하는 서비스.
+// 키는 요청 헤더(x-supadata-key)로만 전달되며, text=false 면 타임스탬프 세그먼트를 준다.
+async function viaSupadata(videoId, apiKey) {
+  const url =
+    "https://api.supadata.ai/v1/transcript?text=false&lang=en&url=" +
+    encodeURIComponent("https://www.youtube.com/watch?v=" + videoId);
+  const res = await fetch(url, { headers: { "x-api-key": apiKey } });
+  let data = await res.json().catch(() => ({}));
+  // 비동기 처리(202): jobId 로 잠깐 폴링.
+  if (res.status === 202 && data.jobId) {
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const j = await fetch("https://api.supadata.ai/v1/transcript/" + data.jobId, {
+        headers: { "x-api-key": apiKey },
+      });
+      const jd = await j.json().catch(() => ({}));
+      if (jd.status === "completed") { data = jd; break; }
+      if (jd.status === "failed") throw new Error("supadata job failed");
+    }
+  } else if (!res.ok) {
+    throw new Error("supadata " + res.status + " " + (data.error || data.message || ""));
+  }
+  const content = Array.isArray(data.content) ? data.content : [];
+  return content
+    .map((c) => {
+      const start = Number(c.offset) / 1000;
+      const end = start + Number(c.duration || 0) / 1000;
+      return { start, end: end > start ? end : start, text: decode(c.text || "") };
+    })
+    .filter((s) => s.text && Number.isFinite(s.start));
+}
+
+// videoId(또는 URL)로 자막 세그먼트 반환. supKey 가 있으면 Supadata 를 먼저 시도.
+// 모두 실패하면 throw → 라우트가 [] 처리.
+export async function fetchTranscriptSegments(videoId, supKey) {
   let segs = [];
-  try {
-    segs = await viaInnertube(videoId);
-  } catch {
-    /* 폴백으로 */
+  // 0) Supadata (키 있을 때) — 클라우드 백엔드에서도 자막을 받는 경로
+  if (supKey) {
+    try {
+      segs = await viaSupadata(videoId, supKey);
+    } catch (e) {
+      console.error("supadata 실패:", videoId, "-", e?.message || e);
+    }
+  }
+  // 1) youtubei.js (주거망 IP, 예: PC 터널)
+  if (!segs.length) {
+    try {
+      segs = await viaInnertube(videoId);
+    } catch {
+      /* 폴백으로 */
+    }
   }
   if (!segs.length) segs = await viaYoutubeTranscript(videoId); // 실패 시 throw → 라우트가 [] 처리
   return regroupSentences(segs);
