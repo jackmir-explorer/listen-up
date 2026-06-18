@@ -1375,8 +1375,10 @@ function App(){
   // 검색 결과 추가: 대본을 비동기로 가져온 뒤 클립 생성 → 학습으로
   const addFromSearch=async r=>{
     const tx=await fetchTranscript(r.id);
+    // 길이(total)를 못 받은 경우(oEmbed 폴백 등) 대본 끝 시간으로 추정 → "0:00" 방지
+    const total=r.total || (tx.length?Math.round(tx[tx.length-1].end):0);
     const clip={id:r.id,title:r.title,channel:r.channel,level:r.level,topics:r.topics,
-      transcript:tx,total:r.total,pos:0,plays:0,vocab:[],marks:[]};
+      transcript:tx,total,pos:0,plays:0,vocab:[],marks:[]};
     setClips(cs=>cs.some(c=>c.id===clip.id)?cs:[...cs,clip]);
     setOpenSeek(null); setOpenId(clip.id); setScreen("study");
   };

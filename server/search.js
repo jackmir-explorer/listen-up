@@ -119,15 +119,23 @@ async function viaOembed(id) {
 export async function getVideoMeta(input) {
   const id = extractVideoId(input);
   if (!id) return null;
-  // 1) getBasicInfo(player API) — 길이까지 받지만 일부 IP(클라우드)에선 403 으로 막힘
+  // 1) getBasicInfo(player API) — 길이까지 받지만 일부 IP(클라우드)에선 막힘.
+  //    에러를 던지지 않고 빈 제목을 줄 수도 있으니, "제대로 된 제목이 있을 때만" 채택한다.
   try {
     const yt = await getYt();
     const info = await yt.getBasicInfo(id);
     const bi = (info && info.basic_info) || {};
-    const title = bi.title || id;
-    return { id, title, channel: bi.author || "", level: guessLevel(title), topics: [], total: bi.duration || 0 };
+    if (bi.title) {
+      return { id, title: bi.title, channel: bi.author || "", level: guessLevel(bi.title), topics: [], total: bi.duration || 0 };
+    }
   } catch (e) {
-    // 2) oEmbed 폴백 (player 차단 시) — 제목/채널만, 길이는 0
+    /* oEmbed 폴백으로 */
+  }
+  // 2) oEmbed 폴백 (player 차단/제목 없음) — 제목/채널만, 길이는 0.
+  try {
     return await viaOembed(id);
+  } catch (e) {
+    // 3) 최후: 둘 다 실패해도 import 자체는 되게 ID 를 임시 제목으로(추가 후 재생은 가능)
+    return { id, title: id, channel: "", level: "", topics: [], total: 0 };
   }
 }
