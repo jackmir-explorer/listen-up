@@ -616,6 +616,9 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
   const curLineRef=useRef(null);  // 현재 재생 줄
   const TX=clip.transcript, TOTAL=clip.total;
   const curIdx=TX.findIndex(l=>time>=l.start && time<l.end);
+  // 항상 최신 vocab/marks 를 가리키는 ref (길이 저장 시 방금 추가한 어휘를 덮어쓰지 않도록)
+  const vocabRef=useRef(vocab); vocabRef.current=vocab;
+  const marksRef=useRef(marks); marksRef.current=marks;
 
   // 영상 흐름 따라 현재 줄 자동 스크롤 (화면 밖으로 나갈 때만 가운데로 — 수동 스크롤 방해 최소화)
   useEffect(()=>{
@@ -666,6 +669,18 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
     },200);
     return ()=>clearInterval(iv);
   },[playing]);
+
+  // 길이(total)를 모르면(0) 플레이어에서 실제 길이를 읽어 한 번 저장 → "0:00" 교정
+  useEffect(()=>{
+    if(TOTAL) return;
+    const iv=setInterval(()=>{
+      const p=playerRef.current; if(!p||!p.getDuration) return;
+      let d=0; try{ d=Math.round(p.getDuration()); }catch(e){ return; }
+      if(d>0){ clearInterval(iv);
+        if(onPersist) onPersist({...clip,vocab:vocabRef.current,marks:marksRef.current,pos:Math.round(time),plays:clip.plays,total:d}); }
+    },500);
+    return ()=>clearInterval(iv);
+  },[TOTAL]);
 
   const flash=m=>{ setToast(m); clearTimeout(toastT.current); toastT.current=setTimeout(()=>setToast(""),1500); };
   const seek=s=>{ setTime(s); try{ playerRef.current && playerRef.current.seekTo(s,true); }catch(e){} };
