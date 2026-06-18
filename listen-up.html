@@ -1147,11 +1147,32 @@ function setGistId(id){ GIST_ID=id||"";
   if(GIST_ID) localStorage.setItem("gist_id",GIST_ID); else localStorage.removeItem("gist_id"); }
 function localTS(){ return Number(localStorage.getItem(TS_KEY)||0); }
 
+// 토큰으로 기존 sync Gist 를 찾아 GIST_ID 를 채운다.
+// (다른 기기에서 만든 Gist 를 자동 인식 → 기기 간 동기화의 핵심. 같은 토큰이면 같은 Gist 를 쓰게 됨.
+//  중복 Gist 가 여러 개면 가장 최근에 갱신된 것을 선택해 데이터 손실을 막는다.)
+async function gistDiscover(){
+  if(!GIST_TOKEN || GIST_ID) return GIST_ID;
+  let best=null;
+  for(let page=1; page<=5; page++){
+    const res=await fetch("https://api.github.com/gists?per_page=100&page="+page,{ headers:gistHeaders() });
+    if(!res.ok) break;
+    const list=await res.json();
+    if(!Array.isArray(list) || !list.length) break;
+    for(const g of list){
+      if(g.files && g.files[GIST_FILE] && (!best || new Date(g.updated_at) > new Date(best.updated_at))) best=g;
+    }
+    if(list.length<100) break;
+  }
+  if(best) setGistId(best.id);
+  return GIST_ID;
+}
+
 // 라이브러리를 Gist 로 올림(없으면 비공개 Gist 생성). 성공 시 updatedAt 반환.
 async function gistPush(clips){
   if(!GIST_TOKEN) throw new Error("토큰이 없습니다");
   const updatedAt = Date.now();
   const file = { content: JSON.stringify({ updatedAt, clips }) };
+  if(!GIST_ID) await gistDiscover(); // 다른 기기가 만든 Gist 가 있으면 새로 만들지 말고 그걸 갱신
   if(!GIST_ID){
     const res=await fetch("https://api.github.com/gists",{ method:"POST", headers:gistHeaders(),
       body:JSON.stringify({ description:"Listen-up sync", public:false, files:{ [GIST_FILE]:file } }) });
@@ -1169,7 +1190,9 @@ async function gistPush(clips){
 
 // Gist 에서 라이브러리 가져오기 → {updatedAt, clips} 또는 null.
 async function gistPull(){
-  if(!GIST_TOKEN || !GIST_ID) return null;
+  if(!GIST_TOKEN) return null;
+  if(!GIST_ID) await gistDiscover(); // 이 기기엔 gist_id 가 없어도 토큰으로 기존 Gist 를 찾음
+  if(!GIST_ID) return null;
   const res=await fetch("https://api.github.com/gists/"+GIST_ID,{ headers:gistHeaders() });
   if(res.status===404){ setGistId(""); return null; }
   if(!res.ok) throw new Error("Gist 불러오기 실패 ("+res.status+")");
