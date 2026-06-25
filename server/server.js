@@ -145,24 +145,32 @@ async function toEnglishTopics(topics, apiKey) {
 }
 
 // ── POST /api/search ──────────────────────────────────────────────
-// body: { minSec, maxSec, level, topics[], page } → [{ id, title, channel, level, topics, total }]
+// body: { minSec, maxSec, level, topics[], page }
+// 응답: NDJSON 스트림 — 결과 1건당 한 줄({...}\n). 검색되는 대로 즉시 흘려보내
+//       프런트가 오는 대로 화면에 추가한다(체감 속도 개선).
 app.post("/api/search", async (req, res) => {
   const f = req.body || {};
   const topics = Array.isArray(f.topics) ? f.topics : [];
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Accel-Buffering", "no"); // 프록시(예: Render) 버퍼링 방지
   try {
     const topicsEn = await toEnglishTopics(topics, resolveKey(req)); // 한글 토픽을 영어로
-    const results = await searchVideos({
-      minSec: Number(f.minSec) || 0,
-      maxSec: Number(f.maxSec) || 36000,
-      level: Number.isInteger(f.level) ? f.level : 2,
-      topics,        // 원본(표시용)
-      topicsEn,      // 영어(검색용)
-      page: Number(f.page) || 0,
-    });
-    return res.json(results);
+    await searchVideos(
+      {
+        minSec: Number(f.minSec) || 0,
+        maxSec: Number(f.maxSec) || 36000,
+        level: Number.isInteger(f.level) ? f.level : 2,
+        topics,        // 원본(표시용)
+        topicsEn,      // 영어(검색용)
+        page: Number(f.page) || 0,
+      },
+      (item) => res.write(JSON.stringify(item) + "\n") // 결과 1건 → 한 줄 즉시 전송
+    );
+    res.end();
   } catch (err) {
     console.error("search 실패:", err?.name || "", err?.message || err);
-    return res.json([]); // 실패 시 빈 배열 (프런트가 "결과 없음" 처리)
+    res.end(); // 빈 스트림 → 프런트가 "결과 없음" 처리
   }
 });
 

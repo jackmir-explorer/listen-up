@@ -55,7 +55,9 @@ function shuffle(arr) {
 
 // topicsEn: 상위(서버 라우트)에서 한글 토픽을 영어로 번역해 넘겨준 값(있으면 우선).
 // page: "다른 결과 보기" 누를수록 커지며 더 깊은 검색 페이지를 본다.
-export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, page = 0 } = {}) {
+// onResult: (선택) 결과 1건이 확정될 때마다 호출 → 라우트가 NDJSON 으로 즉시 스트리밍.
+//   첫 페이지 결과를 먼저 흘려보내고, 다음 continuation 페이지를 받아오며 계속 추가한다.
+export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, page = 0 } = {}, onResult) {
   const yt = await getYt();
   const enTopics = (topicsEn && topicsEn.length ? topicsEn : (topics || []).map((t) => TOPIC_EN[t] || t)).filter(Boolean);
   const hint = LEVEL_HINTS[Math.max(0, Math.min(LEVEL_HINTS.length - 1, level | 0))] || "";
@@ -71,27 +73,29 @@ export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topi
   }
   const skip = Math.max(0, page | 0) * 2; // 페이지마다 2단계씩 더 깊이
   const take = 3;                          // 한 번에 3페이지 분량 수집
-  const raw = [];
+  const seen = new Set();
+  const out = [];
   for (let i = 0; i < skip + take; i++) {
-    if (i >= skip) for (const v of p.videos || []) raw.push(v);
+    if (i >= skip) {
+      // 페이지 단위로 섞어 매번 같은 줄세움을 막으면서도, 결과를 오는 대로 흘려보낸다.
+      const batch = shuffle((p.videos || []).slice());
+      for (const v of batch) {
+        const id = v?.id || v?.video_id;
+        if (!id || seen.has(id) || !v?.duration?.seconds) continue;
+        seen.add(id);
+        const title = v.title?.text ?? String(v.title ?? "");
+        if (!title || NOSPEECH.test(title)) continue;       // 무발화 콘텐츠 제외
+        const total = v.duration?.seconds ?? 0;
+        if (total < minSec || total > maxSec) continue;
+        const item = { id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total };
+        out.push(item);
+        if (onResult) { try { onResult(item); } catch { /* 클라 끊김 등 무시 */ } }
+      }
+    }
     if (!p.has_continuation) break;
     try { p = await p.getContinuation(); } catch { break; }
   }
-
-  // 중복 제거 + 메타 변환 + 필터
-  const seen = new Set();
-  const out = [];
-  for (const v of raw) {
-    const id = v?.id || v?.video_id;
-    if (!id || seen.has(id) || !v?.duration?.seconds) continue;
-    seen.add(id);
-    const title = v.title?.text ?? String(v.title ?? "");
-    if (!title || NOSPEECH.test(title)) continue;       // 무발화 콘텐츠 제외
-    const total = v.duration?.seconds ?? 0;
-    if (total < minSec || total > maxSec) continue;
-    out.push({ id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total });
-  }
-  return shuffle(out); // 순서 섞어 매번 같은 줄세움 방지
+  return out;
 }
 
 // ── URL/ID 에서 11자리 영상 ID 추출 ──

@@ -299,19 +299,32 @@ async function analyze(text, type){
   await sleep(MOCK_DELAY); return mockAnalyze(text,type);
 }
 
-// POST /api/search   body:{ minSec, maxSec, maxLevel:"A2"|"B1"|"B2"|"C1", topics:string[] }
-//   → [{ id, title, channel, level, topics:string[], total:seconds }]   (대본 미포함)
-async function searchVideos(filters){
+// POST /api/search   body:{ minSec, maxSec, level, topics:string[], page }
+//   → 응답은 NDJSON 스트림(결과 1건당 한 줄). onResult(item) 으로 오는 대로 전달하고,
+//     전체 배열을 반환한다(onResult 없으면 모아서 반환 — 하위호환).
+async function searchVideos(filters, onResult){
   if(USE_BACKEND){
     try{
       const res=await fetch(apiBase()+"/api/search",{method:"POST",
         headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
         body:JSON.stringify(filters)});
       if(!res.ok) throw new Error("search "+res.status);
-      return await res.json();
+      const out=[];
+      const emit=line=>{ const t=line.trim(); if(!t) return;
+        try{ const item=JSON.parse(t); out.push(item); if(onResult) onResult(item); }catch(e){} };
+      if(res.body && res.body.getReader){          // 스트리밍: 오는 대로 한 줄씩 파싱
+        const reader=res.body.getReader(), dec=new TextDecoder(); let buf="";
+        for(;;){ const {value,done}=await reader.read(); if(done) break;
+          buf+=dec.decode(value,{stream:true});
+          let nl; while((nl=buf.indexOf("\n"))>=0){ emit(buf.slice(0,nl)); buf=buf.slice(nl+1); } }
+        emit(buf);
+      }else{                                       // 폴백: 한 번에 받아 줄 단위 파싱
+        (await res.text()).split("\n").forEach(emit);
+      }
+      return out;
     }catch(e){ console.error("search failed:",e); return []; }
   }
-  await sleep(120); return mockSearch(filters);
+  await sleep(120); const r=mockSearch(filters); if(onResult) r.forEach(onResult); return r;
 }
 
 // POST /api/transcript   body:{ videoId }
@@ -942,10 +955,13 @@ function Search({existingIds,onAdd,onImport,onNav}){
   useEffect(()=>{ try{localStorage.setItem("listen-up.topics",JSON.stringify(allTopics));}catch(e){} },[allTopics]);
   // 필터 바뀌면 page 0 으로
   useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics]);
-  // 검색 (필터·page 변동 시)
+  // 검색 (필터·page 변동 시) — 결과를 스트리밍으로 오는 대로 추가(체감 속도 ↑)
   useEffect(()=>{
-    let alive=true; setLoading(true);
-    searchVideos({minSec:minM*60,maxSec:maxM*60,level:lvl,topics,page}).then(r=>{ if(alive){ setResults(r); setLoading(false); } });
+    let alive=true; setLoading(true); setResults([]);
+    searchVideos({minSec:minM*60,maxSec:maxM*60,level:lvl,topics,page},
+      item=>{ if(alive) setResults(rs=>[...rs,item]); })
+      .then(()=>{ if(alive) setLoading(false); })
+      .catch(()=>{ if(alive) setLoading(false); });
     return ()=>{ alive=false; };
   },[minM,maxM,lvl,topics,page]);
 
@@ -963,7 +979,7 @@ function Search({existingIds,onAdd,onImport,onNav}){
   return (
     <div className="app">
       <Top screen="search" onNav={onNav}/>
-      <div className="lib-head"><h2>콘텐츠 검색</h2><span className="sub">{loading?"검색 중…":"결과 "+results.length+"개"}</span></div>
+      <div className="lib-head"><h2>콘텐츠 검색</h2><span className="sub">{loading?("검색 중…"+(results.length?" "+results.length:"")):"결과 "+results.length+"개"}</span></div>
       <div className="sbar" style={{display:"flex",gap:"8px",alignItems:"center"}}>
         <span className="flab" style={{minWidth:"auto"}}>링크로 추가</span>
         <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
@@ -1000,7 +1016,7 @@ function Search({existingIds,onAdd,onImport,onNav}){
           </div>
         </div>
       </div>
-      {loading
+      {loading && results.length===0
         ? <div className="nores">검색 중…</div>
         : results.length===0
           ? <div className="nores">조건에 맞는 콘텐츠가 없어요. 필터를 넓혀 보세요.</div>
