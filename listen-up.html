@@ -1538,8 +1538,19 @@ async function gistPull(){
      users/{uid} 문서에 저장돼 어느 기기든 로그인만 하면 이어진다. last-write-wins.
    · clips 는 각각 users/{uid}/clips/{clipId} 하위문서로 저장 (1MB 문서 한도 회피). */
 const FBCFG_KEY="listen-up.fbcfg";
+// 내장 Firebase 설정 — 모든 기기에서 붙여넣기 없이 바로 로그인 가능.
+// (apiKey 는 비밀키가 아닌 공개 식별자 — 실제 보안은 승인 도메인 + Firestore 규칙이 담당)
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCKJsz0fy078eWvX1lkE_OZg9zfz8fVEpI",
+  authDomain: "listen-up-99d56.firebaseapp.com",
+  projectId: "listen-up-99d56",
+  storageBucket: "listen-up-99d56.firebasestorage.app",
+  messagingSenderId: "763637235753",
+  appId: "1:763637235753:web:7cdd992f3c6265f5c89c38",
+};
 function getFirebaseConfig(){
   if(window.LISTEN_UP_FIREBASE && window.LISTEN_UP_FIREBASE.apiKey) return window.LISTEN_UP_FIREBASE;
+  if(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey) return FIREBASE_CONFIG;
   try{ const c=JSON.parse(localStorage.getItem(FBCFG_KEY)||"null"); if(c && c.apiKey) return c; }catch(e){}
   return null;
 }
