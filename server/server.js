@@ -106,7 +106,8 @@ app.post("/api/transcript", async (req, res) => {
   }
   try {
     const supKey = (req.header("x-supadata-key") || "").trim();
-    const segments = await fetchTranscriptSegments(videoId.trim(), supKey);
+    const anthKey = (() => { const k = resolveKey(req); return keyError(k) ? "" : k; })(); // 자동자막 문장부호 복원용(선택)
+    const segments = await fetchTranscriptSegments(videoId.trim(), supKey, anthKey);
     return res.json(segments);
   } catch (err) {
     // 자막 비활성/없음/추출 실패 → 빈 배열 (프런트가 빈 대본 UI 로 처리)
@@ -127,9 +128,9 @@ async function toEnglishTopics(topics, apiKey) {
       const anthropic = new Anthropic({ apiKey });
       const msg = await anthropic.messages.create({
         model: MODEL,
-        max_tokens: 40,
+        max_tokens: 60,
         system:
-          "Translate the Korean topic into a short English search keyword (1-3 words) for finding English-language listening/learning videos on YouTube. Reply with ONLY the keyword — no quotes, no punctuation, no explanation.",
+          "Translate the Korean topic or search phrase into a short English YouTube search query (1-6 words) for finding English-language listening/learning videos. Reply with ONLY the query — no quotes, no punctuation, no explanation.",
         messages: [{ role: "user", content: ko }],
       });
       const en = (msg.content.find((b) => b.type === "text")?.text || "").trim().replace(/^["'\s]+|["'\s]+$/g, "");
@@ -155,14 +156,20 @@ app.post("/api/search", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("X-Accel-Buffering", "no"); // 프록시(예: Render) 버퍼링 방지
   try {
-    const topicsEn = await toEnglishTopics(topics, resolveKey(req)); // 한글 토픽을 영어로
+    const key = resolveKey(req);
+    const q = typeof f.q === "string" ? f.q.trim() : "";
+    // 한글 검색어·토픽을 영어로 (캐시됨 — 같은 입력은 재번역 안 함)
+    const [qEn] = q ? await toEnglishTopics([q], key) : [""];
+    const topicsEn = await toEnglishTopics(topics, key);
     await searchVideos(
       {
+        q: qEn,
         minSec: Number(f.minSec) || 0,
         maxSec: Number(f.maxSec) || 36000,
         level: Number.isInteger(f.level) ? f.level : 2,
         topics,        // 원본(표시용)
         topicsEn,      // 영어(검색용)
+        sort: typeof f.sort === "string" ? f.sort : "relevance",
         page: Number(f.page) || 0,
       },
       (item) => res.write(JSON.stringify(item) + "\n") // 결과 1건 → 한 줄 즉시 전송

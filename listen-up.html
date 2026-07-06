@@ -71,8 +71,17 @@
     color:#2c2c2a;padding:2px 7px;border-radius:6px;}
   .thumb .dur{position:absolute;bottom:7px;right:7px;font-size:10px;background:rgba(0,0,0,.6);color:#fff;
     padding:2px 6px;border-radius:5px;font-variant-numeric:tabular-nums;}
-  .thumb .prog{position:absolute;bottom:0;left:0;height:3px;background:var(--info);}
+  .thumb .prog{position:absolute;bottom:0;left:0;height:3px;background:var(--info);z-index:2;}
   .thumb .ic{font-size:26px;color:#cfcdc5;}
+  .thimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .thumb .lvl,.thumb .dur,.thumb .del{z-index:2;}
+  /* 검색창 */
+  .qrow{display:flex;gap:8px;align-items:center;}
+  .qin{flex:1;min-width:0;height:40px;font-size:14px;border:1.5px solid var(--border2);border-radius:10px;
+    padding:0 13px;font-family:inherit;color:var(--text);background:var(--surface);}
+  .qin:focus{outline:none;border-color:var(--info);}
+  .qbtn{height:40px;display:flex;align-items:center;white-space:nowrap;}
+  .qhist{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;}
   .thumb .del{position:absolute;top:7px;right:7px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;
     background:rgba(0,0,0,.55);color:#fff;border-radius:6px;font-size:12px;cursor:pointer;opacity:0;transition:opacity .12s;z-index:2;}
   .clipcard:hover .thumb .del{opacity:1;}
@@ -401,7 +410,9 @@ async function fetchTranscript(videoId){
   if(USE_BACKEND){
     try{
       const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
-        headers:{"Content-Type":"application/json", ...(SUPADATA_KEY?{"x-supadata-key":SUPADATA_KEY}:{})},
+        headers:{"Content-Type":"application/json",
+          ...(SUPADATA_KEY?{"x-supadata-key":SUPADATA_KEY}:{}),
+          ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})}, // 자동자막 문장부호 복원용
         body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
       return await res.json();
@@ -648,7 +659,11 @@ function Library({clips,onOpen,onSearch,onNav,onRemove,due}){
           return (
             <div className="clipcard" key={c.id} onClick={()=>onOpen(c.id)}>
               <div className="thumb">
-                <span className="lvl">{c.level}</span><span className="ic">▶</span>
+                <span className="ic">▶</span>
+                <img className="thimg" loading="lazy" alt=""
+                  src={"https://i.ytimg.com/vi/"+c.id+"/mqdefault.jpg"}
+                  onError={e=>{e.target.style.display="none";}}/>
+                {c.level && <span className="lvl">{c.level}</span>}
                 <span className="dur">{fmt(c.total)}</span>
                 {pct>0 && <span className="prog" style={{width:pct+"%"}}></span>}
                 <span className="del" title="클립 삭제" onClick={e=>{e.stopPropagation(); onRemove(c.id);}}>✕</span>
@@ -1135,19 +1150,29 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
   const [addingId,setAddingId]=useState(null);
   const [importUrl,setImportUrl]=useState("");
   const [importing,setImporting]=useState(false);
+  const [q,setQ]=useState("");                 // 검색창 입력 중인 값
+  const [qDone,setQDone]=useState("");         // 제출된 검색어 (Enter/버튼)
+  const [sort,setSort]=useState("relevance");  // 정렬: 관련순|최신순|조회순
+  const [qhist,setQhist]=useState(loadQHist());
   // 주제 목록 영속화(추가·삭제 유지)
   useEffect(()=>{ try{localStorage.setItem("listen-up.topics",JSON.stringify(allTopics));}catch(e){} },[allTopics]);
   // 필터 바뀌면 page 0 으로
-  useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics]);
-  // 검색 (필터·page 변동 시) — 결과를 스트리밍으로 오는 대로 추가(체감 속도 ↑)
+  useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics,qDone,sort]);
+  // 검색 (검색어·필터·page 변동 시) — 350ms 디바운스 + 결과 스트리밍(오는 대로 추가)
   useEffect(()=>{
-    let alive=true; setLoading(true); setResults([]);
-    searchVideos({minSec:minM*60,maxSec:maxM*60,level:lvl,topics,page},
-      item=>{ if(alive) setResults(rs=>[...rs,item]); })
-      .then(()=>{ if(alive) setLoading(false); })
-      .catch(()=>{ if(alive) setLoading(false); });
-    return ()=>{ alive=false; };
-  },[minM,maxM,lvl,topics,page]);
+    let alive=true; setLoading(true);
+    const t=setTimeout(()=>{ if(!alive) return;
+      setResults([]);
+      searchVideos({q:qDone,minSec:minM*60,maxSec:maxM*60,level:lvl,topics,sort,page},
+        item=>{ if(alive) setResults(rs=>[...rs,item]); })
+        .then(()=>{ if(alive) setLoading(false); })
+        .catch(()=>{ if(alive) setLoading(false); });
+    },350);
+    return ()=>{ alive=false; clearTimeout(t); };
+  },[minM,maxM,lvl,topics,page,qDone,sort]);
+
+  const submitQ=()=>{ const v=q.trim(); setQDone(v);
+    if(v){ saveQHist(v); setQhist(loadQHist()); } };
 
   const toggle=t=>setTopics(ts=>ts.includes(t)?ts.filter(x=>x!==t):[...ts,t]);
   const removeTopic=t=>{ setAllTopics(a=>a.filter(x=>x!==t)); setTopics(ts=>ts.filter(x=>x!==t)); };
@@ -1164,15 +1189,30 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
     <div className="app">
       <Top screen="search" onNav={onNav} due={due}/>
       <div className="lib-head"><h2>콘텐츠 검색</h2><span className="sub">{loading?("검색 중…"+(results.length?" "+results.length:"")):"결과 "+results.length+"개"}</span></div>
-      <div className="sbar" style={{display:"flex",gap:"8px",alignItems:"center"}}>
-        <span className="flab" style={{minWidth:"auto"}}>링크로 추가</span>
-        <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&doImport()}
-          placeholder="YouTube 링크 또는 영상 ID 붙여넣기"
-          style={{flex:1,minWidth:0,height:"32px",fontSize:"12px",border:"1px solid var(--border2)",borderRadius:"8px",padding:"0 10px",fontFamily:"inherit",color:"var(--text)",background:"var(--surface)"}}/>
-        <span className={"addbtn"+(importing?" busy":"")} onClick={doImport}>{importing?"가져오는 중…":"가져오기"}</span>
+      <div className="sbar">
+        <div className="qrow">
+          <input className="qin" value={q} onChange={e=>setQ(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&submitQ()} enterKeyHint="search"
+            placeholder="무엇을 듣고 싶나요? (한글로 써도 영어로 검색돼요)"/>
+          <span className="addbtn qbtn" onClick={submitQ}>🔍 검색</span>
+        </div>
+        {qhist.length>0 && (
+          <div className="qhist">
+            {qhist.map(h=>(
+              <span key={h} className={"chip"+(qDone===h?" on":"")} onClick={()=>{ setQ(h); setQDone(h); }}>
+                {h}<span className="chip-x" title="기록 삭제"
+                  onClick={e=>{ e.stopPropagation(); rmQHist(h); setQhist(loadQHist()); }}>×</span>
+              </span>))}
+          </div>)}
       </div>
       <div className="sbar">
+        <div className="frow">
+          <span className="flab">정렬</span>
+          <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+            {[["relevance","관련순"],["upload_date","최신순"],["view_count","조회순"]].map(([k,lab])=>
+              <span key={k} className={"chip"+(sort===k?" on":"")} onClick={()=>setSort(k)}>{lab}</span>)}
+          </div>
+        </div>
         <div className="frow">
           <span className="flab">길이</span>
           <div className="range">
@@ -1200,6 +1240,14 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
           </div>
         </div>
       </div>
+      <div className="sbar" style={{display:"flex",gap:"8px",alignItems:"center"}}>
+        <span className="flab" style={{minWidth:"auto"}}>링크로 추가</span>
+        <input value={importUrl} onChange={e=>setImportUrl(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&doImport()}
+          placeholder="YouTube 링크 또는 영상 ID 붙여넣기"
+          style={{flex:1,minWidth:0,height:"32px",fontSize:"12px",border:"1px solid var(--border2)",borderRadius:"8px",padding:"0 10px",fontFamily:"inherit",color:"var(--text)",background:"var(--surface)"}}/>
+        <span className={"addbtn"+(importing?" busy":"")} onClick={doImport}>{importing?"가져오는 중…":"가져오기"}</span>
+      </div>
       {loading && results.length===0
         ? <div className="nores">검색 중…</div>
         : results.length===0
@@ -1210,12 +1258,21 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
                 const busy=addingId===r.id;
                 return (
                   <div className="clipcard" key={r.id} style={{cursor:"default"}}>
-                    <div className="thumb"><span className="lvl">{r.level}</span><span className="ic">▶</span><span className="dur">{fmt(r.total)}</span></div>
+                    <div className="thumb">
+                      <span className="ic">▶</span>
+                      <img className="thimg" loading="lazy" alt=""
+                        src={"https://i.ytimg.com/vi/"+r.id+"/mqdefault.jpg"}
+                        onError={e=>{e.target.style.display="none";}}/>
+                      {r.level && <span className="lvl">{r.level}</span>}
+                      <span className="dur">{fmt(r.total)}</span>
+                    </div>
                     <div className="body">
                       <div className="ttl">{r.title}</div>
-                      <div className="tags">{r.topics.map(t=><span className="t" key={t}>{t}</span>)}</div>
+                      <div className="resmeta" style={{marginBottom:"8px"}}>
+                        {r.channel}{r.views?" · "+r.views:""}{r.published?" · "+r.published:""}
+                      </div>
                       <div className="meta" style={{justifyContent:"space-between"}}>
-                        <span className="resmeta">{r.channel}</span>
+                        <span className="tags" style={{marginBottom:0}}>{r.topics.map(t=><span className="t" key={t}>{t}</span>)}</span>
                         <span className={"addbtn"+(added?" added":busy?" busy":"")}
                           onClick={()=>!added&&!busy&&add(r)}>{added?"추가됨":busy?"불러오는 중…":"+ 추가"}</span>
                       </div>
@@ -1370,6 +1427,12 @@ function _checkGoal(){ try{
 /* 복습 밀린 카드 수 (네비 배지·오늘 카드용) */
 function dueCount(clips){ const now=Date.now();
   return (clips||[]).reduce((s,c)=>s+(c.vocab||[]).filter(v=>(v.due||0)<=now).length,0); }
+
+/* 최근 검색어 (최대 8개) */
+const QHIST_KEY="listen-up.qhist";
+function loadQHist(){ try{ const h=JSON.parse(localStorage.getItem(QHIST_KEY)||"[]"); return Array.isArray(h)?h:[]; }catch(e){ return []; } }
+function saveQHist(q){ try{ localStorage.setItem(QHIST_KEY,JSON.stringify([q,...loadQHist().filter(x=>x!==q)].slice(0,8))); }catch(e){} }
+function rmQHist(q){ try{ localStorage.setItem(QHIST_KEY,JSON.stringify(loadQHist().filter(x=>x!==q))); }catch(e){} }
 function isActiveDay(d){ return !!d && ((d.listen||0)>=60 || (d.vocab||0)>0 || (d.review||0)>0 || (d.dict||0)>0); }
 // 연속 학습일: 오늘(또는 어제)부터 뒤로 세며 활동한 날 수
 function streakDays(){ const s=loadStats(); let n=0; const t=new Date();

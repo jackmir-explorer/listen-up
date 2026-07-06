@@ -53,23 +53,30 @@ function shuffle(arr) {
   return arr;
 }
 
-// topicsEn: 상위(서버 라우트)에서 한글 토픽을 영어로 번역해 넘겨준 값(있으면 우선).
+// q: 자유 검색어(사용자 입력·영어로 번역돼 옴). topicsEn: 한글 토픽의 영어 번역(있으면 우선).
+// sort: relevance(기본)|upload_date|view_count — YouTube 검색 정렬.
 // page: "다른 결과 보기" 누를수록 커지며 더 깊은 검색 페이지를 본다.
 // onResult: (선택) 결과 1건이 확정될 때마다 호출 → 라우트가 NDJSON 으로 즉시 스트리밍.
-//   첫 페이지 결과를 먼저 흘려보내고, 다음 continuation 페이지를 받아오며 계속 추가한다.
-export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, page = 0 } = {}, onResult) {
+const SORTS = new Set(["relevance", "upload_date", "view_count", "rating"]);
+export async function searchVideos({ q = "", minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, sort = "relevance", page = 0 } = {}, onResult) {
   const yt = await getYt();
   const enTopics = (topicsEn && topicsEn.length ? topicsEn : (topics || []).map((t) => TOPIC_EN[t] || t)).filter(Boolean);
   const hint = LEVEL_HINTS[Math.max(0, Math.min(LEVEL_HINTS.length - 1, level | 0))] || "";
-  const parts = [...enTopics, hint].filter(Boolean);
+  // 자유 검색어가 있으면 그것을 중심으로, 토픽·난이도 힌트를 보조로 조합
+  const parts = [String(q || "").trim(), ...enTopics, hint].filter(Boolean);
   const query = parts.length ? parts.join(" ") : "english podcast interview";
+  const sortBy = SORTS.has(sort) ? sort : "relevance";
 
-  // 자막(CC) 필터 검색 → 여러 페이지 수집(다양화). page 가 커지면 앞부분을 건너뛰고 더 깊이 본다.
+  // 자막(CC) 필터 + 정렬 검색 → 여러 페이지 수집(다양화). page 가 커지면 더 깊이 본다.
   let p;
   try {
-    p = await yt.search(query, { type: "video", features: ["subtitles"] });
+    p = await yt.search(query, { type: "video", sort_by: sortBy, features: ["subtitles"] });
   } catch {
-    p = await yt.search(query, { type: "video" }); // 필터 미지원/오류 시 일반 검색으로 폴백
+    try {
+      p = await yt.search(query, { type: "video", sort_by: sortBy });
+    } catch {
+      p = await yt.search(query, { type: "video" }); // 필터·정렬 미지원 시 일반 검색으로 폴백
+    }
   }
   const skip = Math.max(0, page | 0) * 2; // 페이지마다 2단계씩 더 깊이
   const take = 3;                          // 한 번에 3페이지 분량 수집
@@ -77,8 +84,9 @@ export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topi
   const out = [];
   for (let i = 0; i < skip + take; i++) {
     if (i >= skip) {
-      // 페이지 단위로 섞어 매번 같은 줄세움을 막으면서도, 결과를 오는 대로 흘려보낸다.
-      const batch = shuffle((p.videos || []).slice());
+      // 정렬 없는(관련순) 검색만 페이지 단위 셔플로 다양화 — 최신순·조회순은 순서 유지.
+      const vids = (p.videos || []).slice();
+      const batch = sortBy === "relevance" && !q ? shuffle(vids) : vids;
       for (const v of batch) {
         const id = v?.id || v?.video_id;
         if (!id || seen.has(id) || !v?.duration?.seconds) continue;
@@ -87,7 +95,11 @@ export async function searchVideos({ minSec = 0, maxSec = 36000, level = 2, topi
         if (!title || NOSPEECH.test(title)) continue;       // 무발화 콘텐츠 제외
         const total = v.duration?.seconds ?? 0;
         if (total < minSec || total > maxSec) continue;
-        const item = { id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total };
+        const item = {
+          id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total,
+          views: v.short_view_count?.text ?? "",   // 예: "1.2M views"
+          published: v.published?.text ?? "",      // 예: "3 years ago"
+        };
         out.push(item);
         if (onResult) { try { onResult(item); } catch { /* 클라 끊김 등 무시 */ } }
       }
