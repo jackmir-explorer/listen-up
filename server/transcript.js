@@ -8,6 +8,7 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 import { Innertube } from "youtubei.js";
 import { YoutubeTranscript } from "youtube-transcript";
+import Anthropic from "@anthropic-ai/sdk";
 
 const EN_LANGS = ["en", "en-US", "en-GB"];
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -137,8 +138,9 @@ async function viaSupadata(videoId, apiKey) {
 }
 
 // videoId(또는 URL)로 자막 세그먼트 반환. supKey 가 있으면 Supadata 를 먼저 시도.
+// anthKey 가 있으면 문장부호 없는 자동자막을 LLM 으로 복원해 문장 단위로 끊는다.
 // 모두 실패하면 throw → 라우트가 [] 처리.
-export async function fetchTranscriptSegments(videoId, supKey) {
+export async function fetchTranscriptSegments(videoId, supKey, anthKey) {
   let segs = [];
   // 0) Supadata (키 있을 때) — 클라우드 백엔드에서도 자막을 받는 경로
   if (supKey) {
@@ -157,7 +159,7 @@ export async function fetchTranscriptSegments(videoId, supKey) {
     }
   }
   if (!segs.length) segs = await viaYoutubeTranscript(videoId); // 실패 시 throw → 라우트가 [] 처리
-  return regroupSentences(segs);
+  return regroupSmart(segs, anthKey);
 }
 
 // 진단용: 자막 트랙 가시성 + 세 경로 결과/에러를 그대로 보여준다.
@@ -200,10 +202,8 @@ function isSentenceEnd(word) {
   return true;
 }
 
-// 세그먼트를 단어 단위 타임스탬프로 펼친 뒤 문장부호(. ! ?) 기준으로 문장 단위로 묶는다.
-// 문장부호가 없으면(자동 자막 등) 적당한 길이/시간에서 끊어 너무 길지 않게 한다.
-function regroupSentences(segs) {
-  // 1) 단어 단위로 펼치며 각 단어에 시간 부여(세그먼트 내 균등 분배)
+// 세그먼트 → 단어 스트림 [{w,t}] (세그먼트 안에서 시간을 균등 분배해 단어별 시각 부여)
+function explodeWords(segs) {
   const words = [];
   for (const s of segs) {
     const ws = String(s.text).split(/\s+/).filter(Boolean);
@@ -211,9 +211,12 @@ function regroupSentences(segs) {
     const span = Math.max(0, (Number(s.end) || s.start) - s.start);
     ws.forEach((w, i) => words.push({ w, t: s.start + (ws.length > 1 ? (span * i) / ws.length : 0) }));
   }
-  if (!words.length) return [];
+  return words;
+}
 
-  // 2) 단어를 모아 문장(또는 적당 길이) 단위로 flush
+// 단어 스트림 → 문장 세그먼트 (문장부호 . ! ? 기준 + 길이/시간 상한)
+function regroupFromWords(words) {
+  if (!words.length) return [];
   const out = [];
   let buf = [];
   let startT = words[0].t;
@@ -237,4 +240,80 @@ function regroupSentences(segs) {
   }
   if (buf.length) flush(words[words.length - 1].t);
   return out;
+}
+
+// 문장부호가 거의 없는 자동자막: 침묵(단어 간 시간 간격) 기준으로 끊기 (키 없을 때 폴백)
+function regroupByPause(words) {
+  if (!words.length) return [];
+  const out = [];
+  let buf = [];
+  let startT = words[0].t;
+  const flush = (endT) => {
+    const text = buf.join(" ").replace(/\s+/g, " ").trim();
+    if (text) out.push({ start: round2(startT), end: round2(endT), text });
+    buf = [];
+  };
+  for (let i = 0; i < words.length; i++) {
+    const { w, t } = words[i];
+    if (!buf.length) startT = t;
+    buf.push(w);
+    const len = buf.reduce((n, x) => n + x.length + 1, 0);
+    const nextT = i + 1 < words.length ? words[i + 1].t : t;
+    const gap = nextT - t; // 다음 단어까지의 간격 — 크면 호흡/문장 경계일 확률 높음
+    if ((gap >= 0.9 && len >= 24) || len >= 140 || t - startT >= 10) flush(nextT);
+  }
+  if (buf.length) flush(words[words.length - 1].t);
+  return out;
+}
+
+// LLM 문장부호 복원 (자동자막용): 단어는 그대로 두고 부호·대소문자만 고치게 한 뒤,
+// 원 단어열과 정렬해 타임스탬프를 유지한다. 정렬 실패율이 높으면 throw → 호출부가 폴백.
+const PUNCT_MODEL = "claude-haiku-4-5-20251001"; // 부호 복원은 저렴·빠른 모델로 충분
+async function punctuateWords(words, apiKey) {
+  const anthropic = new Anthropic({ apiKey });
+  const CHUNK = 700; // 단어 단위 청크 (10분 영상 ≈ 2~3청크, 병렬 처리)
+  const chunks = [];
+  for (let s = 0; s < words.length; s += CHUNK) chunks.push(words.slice(s, s + CHUNK));
+  const texts = await Promise.all(chunks.map(async (part) => {
+    const msg = await anthropic.messages.create({
+      model: PUNCT_MODEL,
+      max_tokens: 4096,
+      system:
+        "Restore punctuation and capitalization in this raw speech transcript. Keep every word exactly as given, in the same order — do not add, remove, translate, or rephrase any word. Only insert punctuation marks and fix letter casing. Reply with the corrected text only.",
+      messages: [{ role: "user", content: part.map((x) => x.w).join(" ") }],
+    });
+    return msg.content.find((b) => b.type === "text")?.text || "";
+  }));
+  const fixed = texts.join(" ").split(/\s+/).filter(Boolean);
+  // 원 단어열과 정렬: 부호 제거·소문자화 후 비교, 어긋나면 앞쪽 4토큰 창에서 재동기화
+  const norm = (w) => w.toLowerCase().replace(/[^a-z0-9']/g, "");
+  const out = [];
+  let j = 0, matched = 0;
+  for (let i = 0; i < words.length; i++) {
+    const target = norm(words[i].w);
+    let pick = words[i].w;
+    if (target) for (let k = 0; k < 4 && j + k < fixed.length; k++) {
+      if (norm(fixed[j + k]) === target) { pick = fixed[j + k]; j += k + 1; matched++; break; }
+    }
+    out.push({ w: pick, t: words[i].t });
+  }
+  if (matched < words.length * 0.8) throw new Error("단어 정렬 실패 (" + matched + "/" + words.length + ")");
+  return out;
+}
+
+// 대본 정리 진입점: 문장부호가 충분하면 그대로 문장 단위로 끊고,
+// 없으면(자동자막) LLM 부호 복원 → 실패·키 없음이면 침묵 기준으로 끊는다.
+async function regroupSmart(segs, anthKey) {
+  const words = explodeWords(segs);
+  if (!words.length) return [];
+  const enders = words.filter((x) => /[.!?]["'”’)\]]*$/.test(x.w)).length;
+  if (enders / words.length >= 0.02) return regroupFromWords(words); // 100단어당 2개↑ = 부호 신뢰
+  if (anthKey) {
+    try {
+      return regroupFromWords(await punctuateWords(words, anthKey));
+    } catch (e) {
+      console.error("문장부호 복원 실패(침묵 기준으로 폴백):", e?.message || e);
+    }
+  }
+  return regroupByPause(words);
 }
