@@ -285,6 +285,19 @@
   .tbtn.hot{background:var(--info);border-color:var(--info);color:#fff;}
   .navbadge{display:inline-block;margin-left:4px;font-style:normal;font-size:9px;font-weight:700;
     background:var(--danger);color:#fff;border-radius:999px;padding:0 5px;line-height:14px;vertical-align:2px;}
+  /* 로그인 게이트 (첫 화면) */
+  .gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;}
+  .gate-card{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--border);
+    border-radius:16px;padding:30px 24px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.06);}
+  .gate-logo{font-size:42px;line-height:1;}
+  .gate-h{font-size:20px;font-weight:700;margin:12px 0 4px;letter-spacing:-.01em;}
+  .gate-p{font-size:13px;color:var(--muted);line-height:1.7;margin:0 0 22px;}
+  .gate-btn{width:100%;font-family:inherit;font-size:14px;font-weight:600;padding:12px 0;border-radius:10px;
+    cursor:pointer;border:1px solid var(--border2);background:var(--surface);color:var(--text);
+    display:flex;align-items:center;justify-content:center;gap:8px;}
+  .gate-btn.g{background:var(--info);border-color:var(--info);color:#fff;}
+  .gate-skip{display:inline-block;margin-top:14px;font-size:12px;color:var(--hint);cursor:pointer;text-decoration:underline;}
+  .gate-note{font-size:11px;color:var(--hint);margin-top:16px;line-height:1.6;}
 </style>
 </head>
 <body>
@@ -1611,6 +1624,39 @@ function applyCloudExtras(r){ try{
   if(Array.isArray(s.qhist)) localStorage.setItem(QHIST_KEY,JSON.stringify(s.qhist));
 }catch(e){} }
 
+/* 첫 화면 로그인 게이트 — 로그인(또는 게스트 선택) 후에 앱 기능이 열린다 */
+function Gate({configured,checking,onLogin,onGuest,onSaveCfg}){
+  const [txt,setTxt]=useState("");
+  return (
+    <div className="gate">
+      <div className="gate-card">
+        <div className="gate-logo">🎧</div>
+        <div className="gate-h">Listening Miner</div>
+        <p className="gate-p">YouTube 로 배우는 영어 듣기<br/>어휘 채굴 · 받아쓰기 · 간격 반복 복습</p>
+        {checking ? (
+          <p className="gate-p">로그인 확인 중…</p>
+        ) : configured ? <>
+          <button className="gate-btn g" onClick={onLogin}>
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.5 2.5-2.6 3.9-5.35 3.9a6 6 0 1 1 0-12c1.5 0 2.9.55 4 1.45l2.15-2.15A9 9 0 1 0 12 21c5.2 0 8.85-3.65 8.85-8.8 0-.37-.03-.74-.1-1.1z"/></svg>
+            Google 로 시작하기
+          </button>
+          <span className="gate-skip" onClick={onGuest}>로그인 없이 둘러보기</span>
+          <p className="gate-note">로그인하면 라이브러리·통계·설정이 계정에 저장돼<br/>어느 기기에서든 이어집니다.</p>
+        </> : <>
+          <p className="gate-p" style={{marginBottom:"10px"}}>Google 로그인을 쓰려면 1회 설정이 필요해요.<br/>
+            <a className="sync-link" href="https://github.com/jackmir-explorer/listen-up/blob/main/FIREBASE.md"
+              target="_blank" rel="noreferrer">설정 방법 보기 (10분) →</a></p>
+          <textarea className="sync-in" rows="3" placeholder={"Firebase 콘솔의 설정 붙여넣기:\nconst firebaseConfig = { apiKey: … }"}
+            value={txt} onChange={e=>setTxt(e.target.value)}
+            style={{resize:"vertical",fontFamily:"inherit",fontSize:"12px",lineHeight:"1.5",minHeight:"60px",textAlign:"left"}}/>
+          <button className="gate-btn" onClick={()=>onSaveCfg(txt)}>설정 저장 후 로그인</button>
+          <span className="gate-skip" onClick={onGuest}>로그인 없이 시작하기</span>
+        </>}
+      </div>
+    </div>
+  );
+}
+
 /* 화면 위 떠 있는 ⚙ 설정 버튼 + 모달 (API 키 + Gist 동기화, 모든 화면 공통) */
 function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onDisconnect,onPush,onPull,user,onLogin,onLogout}){
   const [key,setKey]=useState("");
@@ -1742,16 +1788,20 @@ function App(){
   // Google 로그인 상태 (Firebase 설정이 있을 때만 활성)
   const [user,setUser]=useState(null);
   const userRef=useRef(null);
+  // 첫 화면 게이트: 로그인 확인이 끝날 때까지 대기, "로그인 없이"는 이 세션 동안 기억
+  const [authChecked,setAuthChecked]=useState(!getFirebaseConfig());
+  const [guest,setGuest]=useState(()=>{ try{ return sessionStorage.getItem("listen-up.guest")==="1"; }catch(e){ return false; } });
+  const enterGuest=()=>{ try{ sessionStorage.setItem("listen-up.guest","1"); }catch(e){} setGuest(true); };
   useEffect(()=>{
     if(!getFirebaseConfig()) return;
     let unsub=null;
     loadFirebase().then(fb=>{
       unsub=fb.auth().onAuthStateChanged(u=>{
         const su=u?{uid:u.uid,name:u.displayName||"",email:u.email||"",photo:u.photoURL||""}:null;
-        userRef.current=su; setUser(su);
+        userRef.current=su; setUser(su); setAuthChecked(true);
         if(su) initialCloudSync();
       });
-    }).catch(e=>console.error("firebase 초기화 실패:",e));
+    }).catch(e=>{ console.error("firebase 초기화 실패:",e); setAuthChecked(true); });
     return ()=>{ if(unsub) unsub(); };
   },[]);
   const applyRemote=r=>{ skipPush.current=true; setClips(dedupeIds(r.clips)); saveClips(r.clips);
@@ -1872,6 +1922,17 @@ function App(){
     else if(s==="study"&&openId)setScreen("study"); };
 
   let view;
+  // 첫 화면 게이트: 로그인 전(게스트 미선택)에는 앱 기능을 열지 않는다.
+  if(!user && !guest){
+    return <Gate configured={!!getFirebaseConfig()}
+      checking={!!getFirebaseConfig() && !authChecked}
+      onLogin={async()=>{ try{ await googleSignIn(); }
+        catch(e){ window.alert("로그인 실패: "+String(e&&e.message||e)); } }}
+      onGuest={enterGuest}
+      onSaveCfg={t=>{ if(setFirebaseConfig(t)) location.reload();
+        else window.alert("설정을 읽지 못했어요. Firebase 콘솔의 firebaseConfig = { … } 부분을 그대로 붙여넣어 주세요."); }}/>;
+  }
+
   const dueN=dueCount(clips);
   if(screen==="search") view=<Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop} due={dueN}/>;
   else if(screen==="browse") view=<Browse clips={clips} onNav={navTop} onOpenAt={openClipAt} due={dueN}/>;

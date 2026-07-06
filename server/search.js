@@ -66,47 +66,58 @@ export async function searchVideos({ q = "", minSec = 0, maxSec = 36000, level =
   const parts = [String(q || "").trim(), ...enTopics, hint].filter(Boolean);
   const query = parts.length ? parts.join(" ") : "english podcast interview";
   const sortBy = SORTS.has(sort) ? sort : "relevance";
+  // 기본(관련순)은 sort_by 를 아예 넘기지 않는다 — 기존에 검증된 호출 형태 유지.
+  const base = { type: "video" };
+  if (sortBy !== "relevance") base.sort_by = sortBy;
 
-  // 자막(CC) 필터 + 정렬 검색 → 여러 페이지 수집(다양화). page 가 커지면 더 깊이 본다.
-  let p;
-  try {
-    p = await yt.search(query, { type: "video", sort_by: sortBy, features: ["subtitles"] });
-  } catch {
-    try {
-      p = await yt.search(query, { type: "video", sort_by: sortBy });
-    } catch {
-      p = await yt.search(query, { type: "video" }); // 필터·정렬 미지원 시 일반 검색으로 폴백
-    }
-  }
   const skip = Math.max(0, page | 0) * 2; // 페이지마다 2단계씩 더 깊이
   const take = 3;                          // 한 번에 3페이지 분량 수집
   const seen = new Set();
   const out = [];
-  for (let i = 0; i < skip + take; i++) {
-    if (i >= skip) {
-      // 정렬 없는(관련순) 검색만 페이지 단위 셔플로 다양화 — 최신순·조회순은 순서 유지.
-      const vids = (p.videos || []).slice();
-      const batch = sortBy === "relevance" && !q ? shuffle(vids) : vids;
-      for (const v of batch) {
-        const id = v?.id || v?.video_id;
-        if (!id || seen.has(id) || !v?.duration?.seconds) continue;
-        seen.add(id);
-        const title = v.title?.text ?? String(v.title ?? "");
-        if (!title || NOSPEECH.test(title)) continue;       // 무발화 콘텐츠 제외
-        const total = v.duration?.seconds ?? 0;
-        if (total < minSec || total > maxSec) continue;
-        const item = {
-          id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total,
-          views: v.short_view_count?.text ?? "",   // 예: "1.2M views"
-          published: v.published?.text ?? "",      // 예: "3 years ago"
-        };
-        out.push(item);
-        if (onResult) { try { onResult(item); } catch { /* 클라 끊김 등 무시 */ } }
+  // 검색 결과 페이지(p)를 따라가며 필터 통과분을 즉시 흘려보낸다.
+  const collect = async (p) => {
+    for (let i = 0; i < skip + take; i++) {
+      if (i >= skip) {
+        // 관련순 + 검색어 없음일 때만 페이지 단위 셔플(다양화) — 정렬·검색어 결과는 순서 유지.
+        const vids = (p.videos || []).slice();
+        const batch = sortBy === "relevance" && !q ? shuffle(vids) : vids;
+        for (const v of batch) {
+          const id = v?.id || v?.video_id;
+          if (!id || seen.has(id) || !v?.duration?.seconds) continue;
+          seen.add(id);
+          const title = v.title?.text ?? String(v.title ?? "");
+          if (!title || NOSPEECH.test(title)) continue;       // 무발화 콘텐츠 제외
+          const total = v.duration?.seconds ?? 0;
+          if (total < minSec || total > maxSec) continue;
+          const item = {
+            id, title, channel: v.author?.name ?? "", level: guessLevel(title), topics: topics || [], total,
+            views: v.short_view_count?.text ?? "",   // 예: "1.2M views"
+            published: v.published?.text ?? "",      // 예: "3 years ago"
+          };
+          out.push(item);
+          if (onResult) { try { onResult(item); } catch { /* 클라 끊김 등 무시 */ } }
+        }
       }
+      if (!p.has_continuation) break;
+      try { p = await p.getContinuation(); } catch { break; }
     }
-    if (!p.has_continuation) break;
-    try { p = await p.getContinuation(); } catch { break; }
+  };
+
+  // 1차: 자막(CC) 필터 검색 → 실패하면 필터 없이
+  try {
+    await collect(await yt.search(query, { ...base, features: ["subtitles"] }));
+  } catch (e) {
+    console.error("CC필터 검색 실패:", e?.message || e);
   }
+  // 0건이면(필터가 결과를 다 걸렀거나 필터 오류) 일반 검색으로 한 번 더
+  if (!out.length) {
+    try {
+      await collect(await yt.search(query, base));
+    } catch (e) {
+      console.error("일반 검색 실패:", e?.message || e);
+    }
+  }
+  console.log(`search "${query}" sort=${sortBy} page=${page} → ${out.length}건`);
   return out;
 }
 
