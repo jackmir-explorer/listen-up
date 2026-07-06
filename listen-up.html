@@ -349,11 +349,14 @@ const API_URL_KEY = "listen-up.apiBase";
 function getApiUrl(){ try{ return localStorage.getItem(API_URL_KEY) || ""; }catch(e){ return ""; } }
 function setApiUrl(u){ u=(u||"").trim().replace(/\/+$/,"");
   if(u) localStorage.setItem(API_URL_KEY,u); else localStorage.removeItem(API_URL_KEY); }
+// 기본 백엔드(Render) — Pages 등에서 ⚙ 설정이 없어도 바로 동작. ⚙ 입력값이 항상 우선.
+const DEFAULT_API_BASE = "https://listen-up-api-g6fk.onrender.com";
 function apiBase(){
   const s=getApiUrl(); if(s) return s;
   if(typeof window.LISTEN_UP_API_BASE === "string" && window.LISTEN_UP_API_BASE) return window.LISTEN_UP_API_BASE;
   if(location.protocol === "file:" || isNativeApp()) return "http://localhost:3001";
-  return ""; // 서버 같은 출처(상대경로)
+  if(/\.github\.io$/.test(location.hostname)) return DEFAULT_API_BASE;
+  return ""; // 서버 같은 출처(상대경로 — 로컬 서버가 프런트를 직접 서빙하는 경우)
 }
 const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
 
@@ -1742,8 +1745,8 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
             <a className="sync-link" href="https://supadata.ai" target="_blank" rel="noreferrer">키 발급하기 (무료) →</a>
           </>}
 
-          <div className="sec-t" style={{marginTop:"18px"}}>백엔드 서버 주소 <span className="muted">— Pages·모바일에서만 필요</span></div>
-          <input className="sync-in" type="text" placeholder="https://your-api.onrender.com"
+          <div className="sec-t" style={{marginTop:"18px"}}>백엔드 서버 주소 <span className="muted">— 비워두면 기본(Render) 사용</span></div>
+          <input className="sync-in" type="text" placeholder={"기본: "+DEFAULT_API_BASE}
             value={api} onChange={e=>{ setApi(e.target.value); setApiSaved(false); }}/>
           <button className="sync-btn primary" onClick={()=>{ onSaveApiUrl(api.trim()); setApiSaved(true); }}>저장</button>
           {apiSaved && <span className="sync-link" style={{cursor:"default"}}>저장됨 ✓ (바로 적용)</span>}
@@ -1817,6 +1820,25 @@ function App(){
   },[]);
   const applyRemote=r=>{ skipPush.current=true; setClips(dedupeIds(r.clips)); saveClips(r.clips);
     localStorage.setItem(TS_KEY,String(r.updatedAt)); };
+
+  // 기기 전환 대응: 앱 화면으로 돌아올 때 계정에 더 새 데이터가 있으면 자동으로 내려받는다.
+  // (다른 기기에서 학습하고 돌아온 경우 — 오래된 상태로 덮어쓰는 사고 방지)
+  useEffect(()=>{
+    const onVis=async()=>{
+      if(document.visibilityState!=="visible" || !userRef.current) return;
+      try{
+        const fb=await loadFirebase(); const u=fb.auth().currentUser; if(!u) return;
+        const doc=await fb.firestore().collection("users").doc(u.uid).get(); // 루트 문서만 가볍게 확인
+        const remoteTs=Number((doc.data()||{}).updatedAt)||0;
+        if(remoteTs>localTS()){
+          const r=await cloudPull();
+          if(r){ applyRemote(r); applyCloudExtras(r); setSync({state:"ok",msg:"내려받음"}); }
+        }
+      }catch(e){ /* 오프라인 등 — 조용히 넘어감 */ }
+    };
+    document.addEventListener("visibilitychange",onVis);
+    return ()=>document.removeEventListener("visibilitychange",onVis);
+  },[]);
   const initialCloudSync=async()=>{
     setSync({state:"syncing",msg:"계정 동기화 중…"});
     try{
