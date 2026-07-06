@@ -256,10 +256,26 @@
   .dict .acc{font-size:12px;font-weight:700;margin-top:4px;}
   .dict .acc.good{color:var(--teal);} .dict .acc.bad{color:var(--danger);}
   .ln.hide p{filter:blur(5px);pointer-events:none;user-select:none;}
-  /* 학습 통계 스트립 */
-  .statsbar{display:flex;gap:8px;flex-wrap:wrap;margin:0 2px 12px;}
-  .stat{font-size:11.5px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:5px 11px;}
-  .stat b{color:var(--text);font-variant-numeric:tabular-nums;}
+  /* 오늘 카드 (홈 상단: 스트릭·목표·이어듣기·복습) */
+  .today{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin:0 0 14px;}
+  .trow1{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .tstreak{font-size:13px;} .tstreak b{font-size:16px;}
+  .tgoal{margin-left:auto;font-size:11.5px;color:var(--info);cursor:pointer;border:1px dashed var(--info-bd);border-radius:7px;padding:2px 9px;user-select:none;white-space:nowrap;}
+  .wkdots{display:flex;gap:3px;}
+  .wd{font-style:normal;font-size:9px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    color:var(--hint);background:var(--bg);border:1px solid var(--border);}
+  .wd.on{background:var(--teal-bg);color:var(--teal);border-color:var(--good-bd);font-weight:700;}
+  .wd.now{box-shadow:0 0 0 1.5px var(--info);}
+  .tbar{height:8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;overflow:hidden;margin:10px 0 6px;}
+  .tbar i{display:block;height:100%;background:linear-gradient(90deg,var(--info),var(--teal));border-radius:5px;transition:width .3s;}
+  .tsub{font-size:11.5px;color:var(--muted);}
+  .tbtns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  .tbtn{font-family:inherit;font-size:12px;font-weight:600;padding:8px 13px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--border2);background:var(--surface);color:var(--text);
+    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tbtn.hot{background:var(--info);border-color:var(--info);color:#fff;}
+  .navbadge{display:inline-block;margin-left:4px;font-style:normal;font-size:9px;font-weight:700;
+    background:var(--danger);color:#fff;border-radius:999px;padding:0 5px;line-height:14px;vertical-align:2px;}
 </style>
 </head>
 <body>
@@ -563,7 +579,7 @@ function diffWords(refText, typedText){
 /* ════════════════════════════════════════════════════════
    UI COMPONENTS
    ════════════════════════════════════════════════════════ */
-function Top({screen,onNav}){
+function Top({screen,onNav,due}){
   return (
     <div className="topbar">
       <span className="brand">Listening Miner</span>
@@ -573,29 +589,58 @@ function Top({screen,onNav}){
         <span className={screen==="search"?"on":""} onClick={()=>onNav("search")}>검색</span>
         <span className={screen==="study"?"on":""} onClick={()=>onNav("study")}>학습</span>
         <span className={screen==="browse"?"on":""} onClick={()=>onNav("browse")}>모아보기</span>
-        <span onClick={()=>onNav("review")}>복습</span>
+        <span onClick={()=>onNav("review")}>복습{due>0 && <i className="navbadge">{due>99?"99+":due}</i>}</span>
       </div>
       <span className="navset" title="설정·동기화" onClick={()=>onNav("settings")}>⚙</span>
     </div>
   );
 }
 
-function Library({clips,onOpen,onSearch,onNav,onRemove}){
+/* 홈 상단 "오늘" 카드 — 스트릭·주간 활동·목표 진행·이어듣기·복습, 매일의 시작점 */
+function TodayCard({clips,due,onOpen,onNav}){
+  const [goal,setGoalState]=useState(getGoalMin());
+  const td=todayStats(), streak=streakDays(), s=loadStats();
+  const min=Math.floor((td.listen||0)/60);
+  const pct=Math.min(100,Math.round(min/goal*100));
+  const cont=[...clips].filter(c=>c.opened).sort((a,b)=>b.opened-a.opened)[0]||clips[0];
+  const cycleGoal=()=>{ const seq=[5,10,15,20,30,45,60];
+    const g=seq[(seq.indexOf(goal)+1)%seq.length]; setGoalMin(g); setGoalState(g); };
+  const days=[...Array(7)].map((_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); return d; });
+  return (
+    <div className="today">
+      <div className="trow1">
+        <span className="tstreak">🔥 <b>{streak}</b>일 연속</span>
+        <span className="wkdots">{days.map((d,i)=>(
+          <i key={i} className={"wd"+(isActiveDay(s.days[ymd(d)])?" on":"")+(i===6?" now":"")}>
+            {"일월화수목금토"[d.getDay()]}</i>))}
+        </span>
+        <span className="tgoal" onClick={cycleGoal} title="탭해서 목표 변경">목표 {goal}분</span>
+      </div>
+      <div className="tbar"><i style={{width:pct+"%"}}></i></div>
+      <div className="tsub">
+        {min>=goal?"🎉 오늘 목표 달성! ("+min+"분)":"오늘 "+min+"분 / "+goal+"분 듣기"}
+        {" · 새 표현 "+(td.vocab||0)+" · 받아쓰기 "+(td.dict||0)}
+      </div>
+      <div className="tbtns">
+        {cont
+          ? <button className="tbtn" onClick={()=>onOpen(cont.id)}>▶ 이어듣기 · {cont.title.length>16?cont.title.slice(0,16)+"…":cont.title}</button>
+          : <button className="tbtn hot" onClick={()=>onNav("search")}>🔍 첫 클립 추가하기</button>}
+        <button className={"tbtn"+(due>0?" hot":"")} onClick={()=>onNav("review")}>
+          {due>0?"🔔 복습 "+due+"개 밀림":"✓ 복습 다 했어요"}</button>
+      </div>
+    </div>
+  );
+}
+
+function Library({clips,onOpen,onSearch,onNav,onRemove,due}){
   const totalVocab=clips.reduce((s,c)=>s+c.vocab.length,0);
-  const streak=streakDays(), td=todayStats();
   return (
     <div className="app">
-      <Top screen="library" onNav={onNav}/>
+      <Top screen="library" onNav={onNav} due={due}/>
+      <TodayCard clips={clips} due={due} onOpen={onOpen} onNav={onNav}/>
       <div className="lib-head">
         <h2>내 라이브러리</h2>
         <span className="sub">클립 {clips.length} · 저장한 표현 {totalVocab}</span>
-      </div>
-      <div className="statsbar">
-        <span className="stat">🔥 연속 <b>{streak}</b>일</span>
-        <span className="stat">오늘 듣기 <b>{Math.floor((td.listen||0)/60)}</b>분</span>
-        <span className="stat">복습 <b>{td.review||0}</b></span>
-        <span className="stat">받아쓰기 <b>{td.dict||0}</b></span>
-        <span className="stat">새 표현 <b>{td.vocab||0}</b></span>
       </div>
       <div className="grid">
         {clips.map(c=>{
@@ -687,7 +732,7 @@ function loadYouTubeAPI(){
   return _ytApiPromise;
 }
 
-function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
+function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
   const [time,setTime]=useState(initialTime!=null?initialTime:(clip.pos||0));
   const [playing,setPlaying]=useState(false);
   const [speed,setSpeed]=useState(1);
@@ -779,6 +824,14 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
   },[TOTAL]);
 
   const flash=m=>{ setToast(m); clearTimeout(toastT.current); toastT.current=setTimeout(()=>setToast(""),1500); };
+
+  // 오늘 듣기 목표를 넘긴 순간 축하 (statAddListen 이 하루 1회 발행)
+  useEffect(()=>{
+    const h=()=>{ setToast("🎉 오늘 듣기 목표 "+getGoalMin()+"분 달성!");
+      clearTimeout(toastT.current); toastT.current=setTimeout(()=>setToast(""),3000); };
+    window.addEventListener("lu-goal-done",h);
+    return ()=>window.removeEventListener("lu-goal-done",h);
+  },[]);
   const seek=s=>{ setTime(s); try{ playerRef.current && playerRef.current.seekTo(s,true); }catch(e){} };
   const cur=()=>({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays});
   const save=()=>onClose({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays+(time>2?1:0)});
@@ -841,7 +894,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist}){
 
   return (
     <div className="app">
-      <Top screen="study" onNav={s=>onNav(s,cur())}/>
+      <Top screen="study" onNav={s=>onNav(s,cur())} due={due}/>
       <div className="clip">
         <div className="l"><span className="back" onClick={save}>← 라이브러리</span><b>{clip.title}</b></div>
         <small>{clip.plays>0?clip.plays+"번째 · ":""}{fmt(time)} / {fmt(TOTAL)}</small>
@@ -1068,7 +1121,7 @@ function ReviewMode({cards,sourceLabel,nextDue,onExit,onGrade}){
   );
 }
 
-function Search({existingIds,onAdd,onImport,onNav}){
+function Search({existingIds,onAdd,onImport,onNav,due}){
   const [minM,setMinM]=useState(0);
   const [maxM,setMaxM]=useState(120);
   const [lvl,setLvl]=useState(2);
@@ -1109,7 +1162,7 @@ function Search({existingIds,onAdd,onImport,onNav}){
 
   return (
     <div className="app">
-      <Top screen="search" onNav={onNav}/>
+      <Top screen="search" onNav={onNav} due={due}/>
       <div className="lib-head"><h2>콘텐츠 검색</h2><span className="sub">{loading?("검색 중…"+(results.length?" "+results.length:"")):"결과 "+results.length+"개"}</span></div>
       <div className="sbar" style={{display:"flex",gap:"8px",alignItems:"center"}}>
         <span className="flab" style={{minWidth:"auto"}}>링크로 추가</span>
@@ -1207,7 +1260,7 @@ function BrowseCard({it,onOpenAt}){
   );
 }
 
-function Browse({clips,onNav,onOpenAt}){
+function Browse({clips,onNav,onOpenAt,due}){
   const items=clips.flatMap(c=>c.vocab.map(v=>({...v,clipTitle:c.title,clipId:c.id})));
   const [sel,setSel]=useState(null);
   const counts={}; items.forEach(v=>{ const k=v.tag||""; counts[k]=(counts[k]||0)+1; });
@@ -1215,7 +1268,7 @@ function Browse({clips,onNav,onOpenAt}){
   const hasUntagged=(counts[""]||0)>0;
   return (
     <div className="app">
-      <Top screen="browse" onNav={onNav}/>
+      <Top screen="browse" onNav={onNav} due={due}/>
       <div className="lib-head"><h2>기능별 모아보기</h2><span className="sub">표현 {items.length}개</span></div>
       {items.length===0
         ? <div className="nores">아직 모은 표현이 없어요.<br/>대본에서 단어·구문을 저장하면 여기에 기능별로 쌓입니다.</div>
@@ -1301,7 +1354,22 @@ function statBump(field,n){ const s=loadStats(); const k=ymd();
   try{ localStorage.setItem(STATS_KEY,JSON.stringify(s)); }catch(e){} }
 // 듣기 시간은 0.2s 단위로 쌓이므로 버퍼에 모아 2초마다 저장 (localStorage 잦은 쓰기 방지)
 let _listenBuf=0;
-function statAddListen(sec){ _listenBuf+=sec; if(_listenBuf>=2){ statBump("listen",Math.round(_listenBuf)); _listenBuf=0; } }
+function statAddListen(sec){ _listenBuf+=sec; if(_listenBuf>=2){ statBump("listen",Math.round(_listenBuf)); _listenBuf=0; _checkGoal(); } }
+
+/* 오늘 듣기 목표(분): 진행 바 + 달성 순간 1회 축하 이벤트 */
+const GOAL_KEY="listen-up.goalMin";
+function getGoalMin(){ const n=Number(localStorage.getItem(GOAL_KEY)); return n>=1?n:10; }
+function setGoalMin(n){ try{ localStorage.setItem(GOAL_KEY,String(n)); }catch(e){} }
+function _checkGoal(){ try{
+  const day=ymd(); if(localStorage.getItem("listen-up.goalDoneDay")===day) return;
+  if((todayStats().listen||0)>=getGoalMin()*60){
+    localStorage.setItem("listen-up.goalDoneDay",day);
+    window.dispatchEvent(new CustomEvent("lu-goal-done"));
+  } }catch(e){} }
+
+/* 복습 밀린 카드 수 (네비 배지·오늘 카드용) */
+function dueCount(clips){ const now=Date.now();
+  return (clips||[]).reduce((s,c)=>s+(c.vocab||[]).filter(v=>(v.due||0)<=now).length,0); }
 function isActiveDay(d){ return !!d && ((d.listen||0)>=60 || (d.vocab||0)>0 || (d.review||0)>0 || (d.dict||0)>0); }
 // 연속 학습일: 오늘(또는 어제)부터 뒤로 세며 활동한 날 수
 function streakDays(){ const s=loadStats(); let n=0; const t=new Date();
@@ -1540,8 +1608,10 @@ function App(){
 
   const persist=u=>setClips(cs=>cs.map(c=>c.id===u.id?u:c));
   const removeClip=id=>setClips(cs=>cs.filter(c=>c.id!==id));
-  const openClip=id=>{ setOpenSeek(null); setOpenId(id); setScreen("study"); };
-  const openClipAt=(id,ts)=>{ setOpenSeek(ts); setOpenId(id); setScreen("study"); };
+  // 열람 시각 기록 → 오늘 카드 "이어듣기" 대상 선정
+  const stampOpen=id=>setClips(cs=>cs.map(c=>c.id===id?{...c,opened:Date.now()}:c));
+  const openClip=id=>{ stampOpen(id); setOpenSeek(null); setOpenId(id); setScreen("study"); };
+  const openClipAt=(id,ts)=>{ stampOpen(id); setOpenSeek(ts); setOpenId(id); setScreen("study"); };
   const closeClip=u=>{ persist(u); setOpenId(null); setScreen("library"); };
   const reviewClip=u=>{ persist(u); setReview({cards:u.vocab.map(c=>({...c,videoId:u.id})),label:u.title,back:"study"}); setScreen("review"); };
   // 간격 반복: 평가 결과를 해당 어휘의 SRS(due·streak)에 반영
@@ -1583,16 +1653,17 @@ function App(){
     else if(s==="study"&&openId)setScreen("study"); };
 
   let view;
-  if(screen==="search") view=<Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop}/>;
-  else if(screen==="browse") view=<Browse clips={clips} onNav={navTop} onOpenAt={openClipAt}/>;
+  const dueN=dueCount(clips);
+  if(screen==="search") view=<Search existingIds={clips.map(c=>c.id)} onAdd={addFromSearch} onImport={importFromUrl} onNav={navTop} due={dueN}/>;
+  else if(screen==="browse") view=<Browse clips={clips} onNav={navTop} onOpenAt={openClipAt} due={dueN}/>;
   else if(screen==="review") view=<ReviewMode cards={review.cards} sourceLabel={review.label} nextDue={review.nextDue} onExit={exitReview} onGrade={gradeCard}/>;
   else if(screen==="study"){ const clip=clips.find(c=>c.id===openId);
-    view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip} onPersist={persist}
+    view=<Study clip={clip} initialTime={openSeek} onClose={closeClip} onReview={reviewClip} onPersist={persist} due={dueN}
       onNav={(s,upd)=>{ if(s==="study")return; persist(upd);
         if(s==="settings")setSyncOpen(true);
         else if(s==="search")setScreen("search"); else if(s==="browse")setScreen("browse");
         else if(s==="review")reviewClip(upd); else { setOpenId(null); setScreen("library"); } }}/>; }
-  else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip}/>;
+  else view=<Library clips={clips} onOpen={openClip} onSearch={()=>setScreen("search")} onNav={navTop} onRemove={removeClip} due={dueN}/>;
   return <>{view}
     <Settings sync={sync} open={syncOpen} setOpen={setSyncOpen} hasKey={hasKey} onSaveKey={saveKey}
       onSaveApiUrl={u=>setApiUrl(u)}
