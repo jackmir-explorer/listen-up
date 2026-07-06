@@ -1519,14 +1519,110 @@ async function gistPull(){
   return Array.isArray(data.clips) ? { updatedAt:Number(data.updatedAt)||0, clips:data.clips } : null;
 }
 
+/* ── Google 계정 동기화 (Firebase Auth + Firestore) ─────────────────
+   · 설정(FIREBASE.md 참고)이 있어야 활성화 — 없으면 기존 localStorage/Gist 모드 그대로.
+   · 로그인하면 라이브러리(clips)·학습통계(stats)·설정(목표분·주제·백엔드주소·검색기록)이
+     users/{uid} 문서에 저장돼 어느 기기든 로그인만 하면 이어진다. last-write-wins.
+   · clips 는 각각 users/{uid}/clips/{clipId} 하위문서로 저장 (1MB 문서 한도 회피). */
+const FBCFG_KEY="listen-up.fbcfg";
+function getFirebaseConfig(){
+  if(window.LISTEN_UP_FIREBASE && window.LISTEN_UP_FIREBASE.apiKey) return window.LISTEN_UP_FIREBASE;
+  try{ const c=JSON.parse(localStorage.getItem(FBCFG_KEY)||"null"); if(c && c.apiKey) return c; }catch(e){}
+  return null;
+}
+// 콘솔에서 복사한 config 스니펫(JS 객체)에서 설정 추출·저장
+function setFirebaseConfig(txt){
+  const m=String(txt||"").match(/\{[\s\S]*\}/); if(!m) return false;
+  try{ const obj=(new Function("return ("+m[0]+")"))();
+    if(obj && obj.apiKey && obj.projectId){ localStorage.setItem(FBCFG_KEY,JSON.stringify(obj)); return true; }
+  }catch(e){}
+  return false;
+}
+function clearFirebaseConfig(){ try{ localStorage.removeItem(FBCFG_KEY); }catch(e){} }
+
+let _fbPromise=null;
+function loadFirebase(){
+  if(_fbPromise) return _fbPromise;
+  const cfg=getFirebaseConfig();
+  if(!cfg) return Promise.reject(new Error("Firebase 설정이 없습니다"));
+  _fbPromise=(async()=>{
+    const load=src=>new Promise((ok,no)=>{ const s=document.createElement("script");
+      s.src=src; s.onload=ok; s.onerror=()=>no(new Error("스크립트 로드 실패: "+src)); document.head.appendChild(s); });
+    if(!window.firebase){
+      const V="10.14.1";
+      await load(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`);
+      await load(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`);
+      await load(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore-compat.js`);
+    }
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    return firebase;
+  })();
+  _fbPromise.catch(()=>{ _fbPromise=null; }); // 실패 시 다음에 재시도 가능하게
+  return _fbPromise;
+}
+async function googleSignIn(){
+  const fb=await loadFirebase();
+  const prov=new fb.auth.GoogleAuthProvider();
+  try{ await fb.auth().signInWithPopup(prov); }
+  catch(e){ // PWA·팝업 차단 환경은 리다이렉트로
+    const c=e && e.code;
+    if(c==="auth/popup-blocked"||c==="auth/popup-closed-by-user"||c==="auth/cancelled-popup-request"
+       ||c==="auth/operation-not-supported-in-this-environment"){
+      await fb.auth().signInWithRedirect(prov);
+    } else throw e;
+  }
+}
+async function googleSignOut(){ const fb=await loadFirebase(); await fb.auth().signOut(); }
+
+// undefined 필드 제거(Firestore 가 거부) — JSON 왕복으로 정리
+const _clean=o=>JSON.parse(JSON.stringify(o));
+async function cloudPush(clips){
+  const fb=await loadFirebase(); const u=fb.auth().currentUser; if(!u) return null;
+  const db=fb.firestore(); const root=db.collection("users").doc(u.uid);
+  const updatedAt=Date.now();
+  const cur=await root.collection("clips").get();
+  const batch=db.batch();
+  const keep=new Set((clips||[]).map(c=>String(c.id)));
+  cur.forEach(d=>{ if(!keep.has(d.id)) batch.delete(d.ref); });   // 삭제된 클립 정리
+  for(const c of clips||[]) batch.set(root.collection("clips").doc(String(c.id)), _clean(c));
+  let topics=null; try{ topics=JSON.parse(localStorage.getItem("listen-up.topics")||"null"); }catch(e){}
+  batch.set(root, _clean({ updatedAt, stats:loadStats(),
+    settings:{ goalMin:getGoalMin(), apiBase:getApiUrl(), topics, qhist:loadQHist() } }));
+  await batch.commit();
+  localStorage.setItem(TS_KEY,String(updatedAt));
+  return updatedAt;
+}
+async function cloudPull(){
+  const fb=await loadFirebase(); const u=fb.auth().currentUser; if(!u) return null;
+  const db=fb.firestore(); const root=db.collection("users").doc(u.uid);
+  const [doc,snap]=await Promise.all([root.get(), root.collection("clips").get()]);
+  if(!doc.exists) return null;
+  const d=doc.data()||{};
+  const clips=[]; snap.forEach(x=>clips.push(x.data()));
+  return { updatedAt:Number(d.updatedAt)||0, clips, stats:d.stats||null, settings:d.settings||null };
+}
+// 내려받은 통계·설정을 이 기기에 적용 (키·토큰은 동기화 대상 아님 — 기기별 보관)
+function applyCloudExtras(r){ try{
+  if(r.stats && r.stats.days) localStorage.setItem(STATS_KEY,JSON.stringify(r.stats));
+  const s=r.settings||{};
+  if(s.goalMin) setGoalMin(s.goalMin);
+  if(s.apiBase && !getApiUrl()) setApiUrl(s.apiBase);          // 이 기기에 이미 설정돼 있으면 유지
+  if(Array.isArray(s.topics)&&s.topics.length) localStorage.setItem("listen-up.topics",JSON.stringify(s.topics));
+  if(Array.isArray(s.qhist)) localStorage.setItem(QHIST_KEY,JSON.stringify(s.qhist));
+}catch(e){} }
+
 /* 화면 위 떠 있는 ⚙ 설정 버튼 + 모달 (API 키 + Gist 동기화, 모든 화면 공통) */
-function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onDisconnect,onPush,onPull}){
+function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onDisconnect,onPush,onPull,user,onLogin,onLogout}){
   const [key,setKey]=useState("");
   const [sdKey,setSdKey]=useState("");
   const [sdHas,setSdHas]=useState(!!getSupadataKey());
   const [token,setToken]=useState("");
   const [api,setApi]=useState(getApiUrl());
   const [apiSaved,setApiSaved]=useState(false);
+  const [fbCfg,setFbCfg]=useState(!!getFirebaseConfig());
+  const [fbTxt,setFbTxt]=useState("");
+  const saveFbCfg=()=>{ if(setFirebaseConfig(fbTxt)){ setFbCfg(true); setFbTxt(""); location.reload(); }
+    else window.alert("설정을 읽지 못했어요. Firebase 콘솔의 firebaseConfig = { … } 부분을 그대로 붙여넣어 주세요."); };
   const connected=gistConnected();
   const needKey = USE_BACKEND && !hasKey;
   return (<>
@@ -1539,7 +1635,33 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
         <div className="sync-card" onClick={e=>e.stopPropagation()}>
           <div className="sync-h">⚙ 설정<span className="x" onClick={()=>setOpen(false)}>✕</span></div>
 
-          <div className="sec-t">Anthropic API 키 <span className="muted">— 뜻·태그 분석에 필요</span></div>
+          <div className="sec-t">Google 계정 <span className="muted">— 라이브러리·통계·설정 동기화</span></div>
+          {fbCfg ? (user ? <>
+            <p className="sync-p">
+              {user.photo && <img src={user.photo} alt="" referrerPolicy="no-referrer"
+                style={{width:"22px",height:"22px",borderRadius:"50%",verticalAlign:"-6px",marginRight:"7px"}}/>}
+              <b>{user.name||user.email}</b> 로 로그인됨 — 변경사항이 계정에 자동 저장돼요.
+            </p>
+            <div className="sync-row">
+              <button className="sync-btn" onClick={onPush}>지금 올리기 ↑</button>
+              <button className="sync-btn" onClick={onPull}>지금 내려받기 ↓</button>
+            </div>
+            <button className="sync-btn danger" onClick={onLogout}>로그아웃</button>
+          </> : <>
+            <p className="sync-p">로그인하면 <b>라이브러리·학습 통계·설정</b>(목표·주제·백엔드 주소)이 계정에 저장돼 어느 기기에서든 이어집니다.</p>
+            <button className="sync-btn primary" onClick={onLogin}>Google 로 로그인</button>
+          </>) : <>
+            <p className="sync-p">1회 설정이 필요해요:
+              <a className="sync-link" style={{marginTop:0,marginLeft:"6px"}}
+                href="https://github.com/jackmir-explorer/listen-up/blob/main/FIREBASE.md"
+                target="_blank" rel="noreferrer">설정 방법 (FIREBASE.md) →</a></p>
+            <textarea className="sync-in" rows="3" placeholder={"Firebase 콘솔의 설정 붙여넣기:\nconst firebaseConfig = { apiKey: … }"}
+              value={fbTxt} onChange={e=>setFbTxt(e.target.value)}
+              style={{resize:"vertical",fontFamily:"inherit",fontSize:"12px",lineHeight:"1.5",minHeight:"64px"}}/>
+            <button className="sync-btn" onClick={saveFbCfg}>설정 저장</button>
+          </>}
+
+          <div className="sec-t" style={{marginTop:"18px"}}>Anthropic API 키 <span className="muted">— 뜻·태그 분석에 필요</span></div>
           {hasKey ? <>
             <p className="sync-p">상태: <b>입력됨 ✓</b></p>
             <button className="sync-btn danger" onClick={()=>onSaveKey("")}>키 지우기</button>
@@ -1569,6 +1691,7 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
           <button className="sync-btn primary" onClick={()=>{ onSaveApiUrl(api.trim()); setApiSaved(true); }}>저장</button>
           {apiSaved && <span className="sync-link" style={{cursor:"default"}}>저장됨 ✓ (바로 적용)</span>}
 
+          {!user && <>
           <div className="sec-t" style={{marginTop:"18px"}}>기기 간 동기화 <span className="muted">— GitHub Gist (선택)</span></div>
           {!connected ? <>
             <p className="sync-p">GitHub <b>PAT</b>(classic, <code>gist</code> 권한)을 넣으면 라이브러리가 <b>비공개 Gist</b> 에 백업·동기화됩니다.</p>
@@ -1586,6 +1709,7 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
             {GIST_ID && <a className="sync-link" href={"https://gist.github.com/"+GIST_ID}
               target="_blank" rel="noreferrer">Gist 열기 →</a>}
             <button className="sync-btn danger" onClick={onDisconnect}>연결 해제</button>
+          </>}
           </>}
 
           <p className="sync-note">키·토큰은 이 기기 브라우저(localStorage)에만 저장됩니다. 공용 PC 에선 사용 후 지우세요.</p>
@@ -1615,6 +1739,36 @@ function App(){
   // 마운트 시 1회: 백엔드 웜업 — Render 무료 플랜은 잠들어 있으므로 미리 깨워 첫 검색 지연 완화
   useEffect(()=>{ const b=apiBase(); if(b){ fetch(b+"/health").catch(()=>{}); } },[]);
 
+  // Google 로그인 상태 (Firebase 설정이 있을 때만 활성)
+  const [user,setUser]=useState(null);
+  const userRef=useRef(null);
+  useEffect(()=>{
+    if(!getFirebaseConfig()) return;
+    let unsub=null;
+    loadFirebase().then(fb=>{
+      unsub=fb.auth().onAuthStateChanged(u=>{
+        const su=u?{uid:u.uid,name:u.displayName||"",email:u.email||"",photo:u.photoURL||""}:null;
+        userRef.current=su; setUser(su);
+        if(su) initialCloudSync();
+      });
+    }).catch(e=>console.error("firebase 초기화 실패:",e));
+    return ()=>{ if(unsub) unsub(); };
+  },[]);
+  const applyRemote=r=>{ skipPush.current=true; setClips(dedupeIds(r.clips)); saveClips(r.clips);
+    localStorage.setItem(TS_KEY,String(r.updatedAt)); };
+  const initialCloudSync=async()=>{
+    setSync({state:"syncing",msg:"계정 동기화 중…"});
+    try{
+      const r=await cloudPull();
+      if(r && r.updatedAt>localTS()){ applyRemote(r); applyCloudExtras(r); setSync({state:"ok",msg:"내려받음"}); }
+      else { await cloudPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+      syncedOnce.current=true;
+    }catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
+  };
+  const doLogin=async()=>{ try{ await googleSignIn(); }
+    catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
+  const doLogout=async()=>{ try{ await googleSignOut(); setSync({state:"idle",msg:""}); }catch(e){} };
+
   // 마운트 시 1회: Gist 와 초기 동기화 (원격이 더 새것이면 내려받고, 아니면 백업)
   useEffect(()=>{
     if(!gistConnected()) return;
@@ -1623,8 +1777,7 @@ function App(){
       try{
         const remote=await gistPull();
         if(remote && remote.updatedAt>localTS()){
-          skipPush.current=true; setClips(dedupeIds(remote.clips)); saveClips(remote.clips);
-          localStorage.setItem(TS_KEY,String(remote.updatedAt));
+          applyRemote(remote);
           setSync({state:"ok",msg:"내려받음"});
         }else{
           await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"});
@@ -1634,27 +1787,30 @@ function App(){
     })();
   },[]);
 
+  // 원격 저장 경로: 로그인 중이면 Google 계정(Firestore), 아니면 Gist
+  const remotePush=()=> userRef.current ? cloudPush(clipsRef.current) : gistPush(clipsRef.current);
+  const remoteConnected=()=> !!userRef.current || gistConnected();
+
   // 변경 시 디바운스(2.5s) 푸시 — 초기 동기화 후에만, 방금 내려받은 건 제외
   useEffect(()=>{
     if(!syncedOnce.current) return;
     if(skipPush.current){ skipPush.current=false; return; }
-    if(!gistConnected()) return;
+    if(!remoteConnected()) return;
     clearTimeout(pushTimer.current);
     setSync(s=>s.state==="syncing"?s:{state:"dirty",msg:"변경됨"});
     pushTimer.current=setTimeout(async()=>{
       setSync({state:"syncing",msg:"저장 중…"});
-      try{ await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+      try{ await remotePush(); setSync({state:"ok",msg:"백업됨"}); }
       catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
     },2500);
   },[clips]);
 
-  const pushNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"저장 중…"});
-    try{ await gistPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
+  const pushNow=async()=>{ if(!remoteConnected())return; setSync({state:"syncing",msg:"저장 중…"});
+    try{ await remotePush(); setSync({state:"ok",msg:"백업됨"}); }
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
-  const pullNow=async()=>{ if(!gistConnected())return; setSync({state:"syncing",msg:"불러오는 중…"});
-    try{ const r=await gistPull();
-      if(r){ skipPush.current=true; setClips(dedupeIds(r.clips)); saveClips(r.clips);
-        localStorage.setItem(TS_KEY,String(r.updatedAt)); setSync({state:"ok",msg:"내려받음"}); }
+  const pullNow=async()=>{ if(!remoteConnected())return; setSync({state:"syncing",msg:"불러오는 중…"});
+    try{ const r=userRef.current?await cloudPull():await gistPull();
+      if(r){ applyRemote(r); if(userRef.current) applyCloudExtras(r); setSync({state:"ok",msg:"내려받음"}); }
       else setSync({state:"ok",msg:"원격 비어있음"}); }
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
   const connectGist=async(t)=>{ setSyncOpen(false); setGistToken(t);
@@ -1730,7 +1886,8 @@ function App(){
   return <>{view}
     <Settings sync={sync} open={syncOpen} setOpen={setSyncOpen} hasKey={hasKey} onSaveKey={saveKey}
       onSaveApiUrl={u=>setApiUrl(u)}
-      onConnect={connectGist} onDisconnect={disconnectGist} onPush={pushNow} onPull={pullNow}/>
+      onConnect={connectGist} onDisconnect={disconnectGist} onPush={pushNow} onPull={pullNow}
+      user={user} onLogin={doLogin} onLogout={doLogout}/>
   </>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);

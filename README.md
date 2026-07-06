@@ -15,7 +15,8 @@ YouTube 로 배우는 영어 듣기 학습 앱.
 | ✍️ 받아쓰기 | 문장 듣고 타이핑 → 단어 단위 채점·정확도 |
 | 🔁 복습 (SRS) | 간격 반복 + 능동 인출 (표현 먼저 → 맥락 듣기 → 정답) |
 | 📊 학습 통계 | 연속 학습일(스트릭)·듣기 시간·복습·받아쓰기 횟수 |
-| ☁️ 기기 간 동기화 | GitHub Gist 로 라이브러리 백업·동기화 |
+| 👤 Google 로그인 | 라이브러리·통계·설정이 계정에 저장 — 어느 기기든 로그인만 하면 이어짐 ([설정법](FIREBASE.md)) |
+| ☁️ Gist 동기화 | (로그인 없이 쓸 때) GitHub Gist 로 라이브러리 백업·동기화 |
 | 📱 PWA | 홈 화면 설치·오프라인 셸·다크 모드 |
 
 ## 구조
@@ -42,7 +43,10 @@ render.yaml · Dockerfile     백엔드 호스팅 (Render 등)
 **API 키 (앱 ⚙ 설정에 입력 — 코드·서버에 저장 안 됨):**
 - **Anthropic** (`sk-ant-…`) — 어휘 뜻·태그 분석용. [발급](https://console.anthropic.com/settings/keys)
 - **Supadata** — 클라우드 백엔드에서 자막 추출용 (무료 월 100건). [발급](https://supadata.ai)
-- **GitHub PAT** (`gist` 권한) — 기기 간 동기화용 (선택)
+- **GitHub PAT** (`gist` 권한) — 기기 간 동기화용 (선택, Google 로그인 시 불필요)
+
+**Google 로그인 (선택):** [FIREBASE.md](FIREBASE.md) 의 1회 설정(약 10분) 후
+⚙ 설정에서 config 붙여넣기 → 로그인. 키를 제외한 모든 데이터가 계정 동기화됩니다.
 
 앱 ⚙ 설정 → "백엔드 서버 주소"에 Render 주소를 넣으면 연결 완료.
 
