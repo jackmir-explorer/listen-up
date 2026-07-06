@@ -20,4 +20,14 @@ const out = path.join(root, "www");
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, "index.html"), src.replace("<!--__API_BASE__-->", inject));
 fs.writeFileSync(path.join(out, ".nojekyll"), ""); // Pages: Jekyll 처리 건너뛰기
-console.log(`✔ www/index.html 생성 (API_BASE='${api || "<런타임: 앱 ⚙ 설정>"}')`);
+
+// PWA 파일 복사 (manifest·서비스워커·아이콘)
+for (const f of ["manifest.webmanifest", "sw.js"]) {
+  fs.copyFileSync(path.join(root, f), path.join(out, f));
+}
+const iconsDir = path.join(root, "icons");
+fs.mkdirSync(path.join(out, "icons"), { recursive: true });
+for (const f of fs.readdirSync(iconsDir)) {
+  fs.copyFileSync(path.join(iconsDir, f), path.join(out, "icons", f));
+}
+console.log(`✔ www/ 생성: index.html + PWA(manifest·sw·icons) (API_BASE='${api || "<런타임: 앱 ⚙ 설정>"}')`);

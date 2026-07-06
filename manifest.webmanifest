@@ -1,0 +1,16 @@
+{
+  "name": "Listening Miner",
+  "short_name": "ListenUp",
+  "description": "YouTube 로 배우는 영어 듣기 — 어휘 채굴 · 받아쓰기 · 간격 반복 복습",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#faf9f7",
+  "theme_color": "#4c5fd6",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
