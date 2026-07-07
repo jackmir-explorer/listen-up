@@ -263,6 +263,8 @@
   .dict .dbtn{font-family:inherit;font-size:12px;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;
     border:1px solid var(--border2);background:var(--surface);color:var(--text);}
   .dict .dbtn.primary{background:var(--info);border-color:var(--info);color:#fff;}
+  .dict .dbtn.rec{background:var(--danger);border-color:var(--danger);color:#fff;animation:recpulse 1.2s ease infinite;}
+  @keyframes recpulse{0%,100%{opacity:1;}50%{opacity:.65;}}
   .dict .dres{margin-top:9px;font-size:14.5px;line-height:1.9;}
   .dict .dres .dw{border-radius:4px;padding:0 2px;}
   .dict .dres .dw.ok{color:var(--teal);}
@@ -842,19 +844,50 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
     longT.current=setTimeout(()=>{ longFired.current=true;
       setPhraseMode(true); setAnchor({li,wi}); flash("구문 시작 — 같은 문장의 끝 단어를 탭하세요"); },500); };
   const wordUp=()=>clearTimeout(longT.current);
-  /* 받아쓰기: 문장 듣고 타이핑 → 단어 단위 채점 */
+  /* 받아쓰기: 문장 듣고 타이핑 또는 말로 입력 → 단어 단위 채점 */
   const openDict=()=>{ if(!TX.length){ flash("자막이 있어야 받아쓰기를 할 수 있어요"); return; }
     try{ playerRef.current && playerRef.current.pauseVideo(); }catch(e){} setPlaying(false);
     setDict({li:curIdx>=0?curIdx:0,typed:"",checked:false,res:null}); };
-  const closeDict=()=>{ dictStopRef.current=null; setDict(null); };
-  const dictPlay=()=>{ if(!dict) return; const L=TX[dict.li];
+  const closeDict=()=>{ dictStopRef.current=null; stopRec(); setDict(null); };
+
+  /* 🎙 말로 입력 (Web Speech API) — 들은 문장을 따라 말하면 텍스트로 받아써짐.
+     영상 소리가 마이크에 섞이지 않게 인식 시작 시 재생을 멈춘다. */
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const micOK=!!SR;
+  const recRef=useRef(null);
+  const [recOn,setRecOn]=useState(false);
+  const stopRec=()=>{ try{ recRef.current && recRef.current.stop(); }catch(e){} setRecOn(false); };
+  useEffect(()=>()=>stopRec(),[]); // 화면 이탈 시 인식 종료
+  const toggleRec=()=>{
+    if(recOn){ stopRec(); return; }
+    if(!SR){ flash("이 브라우저는 음성 입력을 지원하지 않아요 (Chrome 권장)"); return; }
+    try{ playerRef.current && playerRef.current.pauseVideo(); }catch(e){} setPlaying(false);
+    const rec=new SR(); recRef.current=rec;
+    rec.lang="en-US"; rec.interimResults=true; rec.continuous=true;
+    const base=(dict&&dict.typed?dict.typed.trim():"");
+    rec.onresult=ev=>{
+      let fin="",inter="";
+      for(let i=0;i<ev.results.length;i++){ const r=ev.results[i];
+        if(r.isFinal) fin+=r[0].transcript+" "; else inter+=r[0].transcript; }
+      const merged=((base?base+" ":"")+(fin+inter)).replace(/\s+/g," ").trim();
+      setDict(d=>d&&!d.checked?{...d,typed:merged}:d);
+    };
+    rec.onerror=e=>{ setRecOn(false);
+      if(e.error==="not-allowed"||e.error==="service-not-allowed") flash("마이크 권한을 허용해 주세요");
+      else if(e.error!=="aborted"&&e.error!=="no-speech") flash("음성 인식 오류: "+e.error); };
+    rec.onend=()=>setRecOn(false);
+    try{ rec.start(); setRecOn(true); flash("따라 말해 보세요 — 끝나면 버튼을 다시 탭"); }
+    catch(e){ flash("음성 인식을 시작하지 못했어요"); }
+  };
+  const dictPlay=()=>{ if(!dict) return; stopRec(); // 영상 소리가 인식되지 않게
+    const L=TX[dict.li];
     dictStopRef.current=(L.end&&L.end>L.start)?L.end:L.start+6;
     seek(L.start); try{ playerRef.current && playerRef.current.playVideo(); }catch(e){} setPlaying(true); };
-  const dictCheck=()=>{ if(!dict||!dict.typed.trim()) return;
+  const dictCheck=()=>{ if(!dict||!dict.typed.trim()) return; stopRec();
     const res=diffWords(TX[dict.li].text, dict.typed);
     statBump("dict"); if(res.acc>=80) statBump("dictOk");
     setDict(d=>({...d,checked:true,res})); };
-  const dictNext=()=>{ if(!dict) return; const li=dict.li+1;
+  const dictNext=()=>{ if(!dict) return; stopRec(); const li=dict.li+1;
     if(li>=TX.length){ closeDict(); flash("마지막 문장까지 끝냈어요 👏"); return; }
     setDict({li,typed:"",checked:false,res:null}); };
 
@@ -899,6 +932,8 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
                   onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); dictCheck(); } }}/>
                 <div className="drow">
                   <button className="dbtn" onClick={dictPlay}>🔊 문장 듣기</button>
+                  {micOK && <button className={"dbtn"+(recOn?" rec":"")} onClick={toggleRec}>
+                    {recOn?"🔴 말하는 중 · 탭해서 끝":"🎙 말로 입력"}</button>}
                   <button className="dbtn primary" onClick={dictCheck}>확인 (Enter)</button>
                 </div>
               </> : <>
