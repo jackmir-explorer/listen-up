@@ -311,15 +311,11 @@ const {useState,useEffect,useRef} = React;
 /* ════════════════════════════════════════════════════════
    LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)
 
-   상태: 백엔드 연동 완료 · 실제 재생까지 동작.
-     · 데이터: 아래 [API LAYER] 가 서버(/api/*) 호출 (USE_BACKEND=true).
-     · 재생: YouTube IFrame API 실제 플레이어 (Study·Review 컴포넌트).
-   백엔드 계약(서버가 구현하는 엔드포인트):
-       POST /api/analyze     {text,type}        → {ko,en,tag}
-       POST /api/search      {minSec,maxSec,...} → [{id,title,...}]
-       POST /api/transcript  {videoId}          → [{start,end,text}]
+   · 데이터: [API LAYER] 가 서버(/api/*) 호출, 재생은 YouTube IFrame API.
+   백엔드 계약: POST /api/analyze {text,type}→{ko,en,tag} ·
+     /api/search(NDJSON 스트림) · /api/transcript {videoId}→[{start,end,text}] ·
+     /api/import · /api/level-titles
    · analyze 의 tag 는 반드시 FUNCTION_TAGS 안의 값만 (서버에서 강제).
-   · mock 으로 되돌리려면 USE_BACKEND=false (mock 구현은 그대로 보존).
    ════════════════════════════════════════════════════════ */
 
 /* ── 기능 태그 프리셋 (사용자 단어장에서 추출·확정) ──────
@@ -335,7 +331,6 @@ const FUNCTION_TAGS=[
 /* ════════════════════════════════════════════════════════
    API LAYER  ←★ 백엔드 연동은 여기만 수정
    ════════════════════════════════════════════════════════ */
-const USE_BACKEND = true;                   // ←★ 켜짐: /api/analyze 호출 (mock 끄려면 false)
 
 // Capacitor 네이티브 앱 여부 (study-app 방식: isNativeApp() 로 웹/네이티브 분기)
 function isNativeApp(){
@@ -358,7 +353,6 @@ function apiBase(){
   if(/\.github\.io$/.test(location.hostname)) return DEFAULT_API_BASE;
   return ""; // 서버 같은 출처(상대경로 — 로컬 서버가 프런트를 직접 서빙하는 경우)
 }
-const MOCK_DELAY  = 250;                     // mock 지연(ms) — 실제 로딩 UX 확인용, 백엔드 붙이면 무관
 
 // Anthropic API 키 — 앱 ⚙ 설정에서 입력해 localStorage 에 보관, analyze 요청 헤더로 전달.
 // (.env 대신 앱에서 입력 — study-app 의 토큰 입력 방식과 동일)
@@ -374,33 +368,27 @@ function getSupadataKey(){ return SUPADATA_KEY; }
 function setSupadataKey(k){ SUPADATA_KEY=(k||"").trim();
   if(SUPADATA_KEY) localStorage.setItem("supadata_key",SUPADATA_KEY); else localStorage.removeItem("supadata_key"); }
 
-const sleep = ms => new Promise(r=>setTimeout(r,ms));
-
 // POST /api/analyze   body:{ text, type:"word"|"phrase"|"sentence" }
 //   → { ko:string, en:string, tag:string }   (tag 는 FUNCTION_TAGS 안의 값 또는 "")
 async function analyze(text, type){
-  if(USE_BACKEND){
-    // 0) 공유 분석 캐시 — 누군가 이미 분석한 단어·구문이면 API 호출 없이 즉시 반환
-    const hit=await cacheGetAnalyze(text,type);
-    if(hit) return hit;
-    try{
+  // 0) 공유 분석 캐시 — 누군가 이미 분석한 단어·구문이면 API 호출 없이 즉시 반환
+  const hit=await cacheGetAnalyze(text,type);
+  if(hit) return hit;
+  try{
       const res=await fetch(apiBase()+"/api/analyze",{method:"POST",
         headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
         body:JSON.stringify({text,type})});
       if(!res.ok) throw new Error("analyze "+res.status);
-      const a=await res.json();
-      if(a&&(a.ko||a.en)) cacheSetAnalyze(text,type,a); // 백그라운드 캐시 저장
-      return a;
-    }catch(e){ console.error("analyze failed:",e); return {ko:"",en:"",tag:""}; }
-  }
-  await sleep(MOCK_DELAY); return mockAnalyze(text,type);
+    const a=await res.json();
+    if(a&&(a.ko||a.en)) cacheSetAnalyze(text,type,a); // 백그라운드 캐시 저장
+    return a;
+  }catch(e){ console.error("analyze failed:",e); return {ko:"",en:"",tag:""}; }
 }
 
 // POST /api/search   body:{ minSec, maxSec, level, topics:string[], page }
 //   → 응답은 NDJSON 스트림(결과 1건당 한 줄). onResult(item) 으로 오는 대로 전달하고,
 //     전체 배열을 반환한다(onResult 없으면 모아서 반환 — 하위호환).
 async function searchVideos(filters, onResult){
-  if(USE_BACKEND){
     try{
       const res=await fetch(apiBase()+"/api/search",{method:"POST",
         headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
@@ -420,14 +408,12 @@ async function searchVideos(filters, onResult){
       }
       return out;
     }catch(e){ console.error("search failed:",e); return []; }
-  }
-  await sleep(120); const r=mockSearch(filters); if(onResult) r.forEach(onResult); return r;
 }
 
 // POST /api/level-titles   body:{ items:[{id,title,channel}] } → { levels:{id:"A2"|"B1"|"B2"|"C1"} }
 // 검색 결과의 난이도를 제목 기반으로 대략 분류 (서버 캐시·Haiku). 키 없거나 실패 시 {}.
 async function classifyLevels(items){
-  if(!USE_BACKEND || !items.length || !ANTHROPIC_KEY) return {};
+  if(!items.length || !ANTHROPIC_KEY) return {};
   try{
     const res=await fetch(apiBase()+"/api/level-titles",{method:"POST",
       headers:{"Content-Type":"application/json","x-anthropic-key":ANTHROPIC_KEY},
@@ -441,172 +427,39 @@ async function classifyLevels(items){
 //   → [{ start:seconds, end:seconds, text }]
 //   ⚠ 유튜브 자막은 공식 API가 없어 비공식 추출에 의존 → 가장 잘 깨지는 지점. 실패 시 [] 반환·UI 처리 필요.
 async function fetchTranscript(videoId){
-  if(USE_BACKEND){
-    // 0) 공유 자막 캐시(Firestore) — 누군가 한 번 뽑은 영상은 추출 API 를 다시 쓰지 않는다.
-    //    (Supadata 월 한도 절약 + 즉시 로드. 문장부호 복원 결과까지 그대로 재사용)
-    const hit=await cacheGetTranscript(videoId);
-    if(hit) return hit;
-    try{
+  // 0) 공유 자막 캐시(Firestore) — 누군가 한 번 뽑은 영상은 추출 API 를 다시 쓰지 않는다.
+  //    (Supadata 월 한도 절약 + 즉시 로드. 문장부호 복원 결과까지 그대로 재사용)
+  const hit=await cacheGetTranscript(videoId);
+  if(hit) return hit;
+  try{
       const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
         headers:{"Content-Type":"application/json",
           ...(SUPADATA_KEY?{"x-supadata-key":SUPADATA_KEY}:{}),
           ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})}, // 자동자막 문장부호 복원용
         body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
-      const segs=await res.json();
-      if(Array.isArray(segs)&&segs.length) cacheSetTranscript(videoId,segs); // 백그라운드 캐시 저장
-      return segs;
-    }catch(e){ console.error("transcript failed:",e); return []; }
-  }
-  await sleep(MOCK_DELAY); return mockTranscript(videoId);
+    const segs=await res.json();
+    if(Array.isArray(segs)&&segs.length) cacheSetTranscript(videoId,segs); // 백그라운드 캐시 저장
+    return segs;
+  }catch(e){ console.error("transcript failed:",e); return []; }
 }
 
 // POST /api/import   body:{ url }
 //   → { id, title, channel, level, topics, total }   (URL/ID 로 직접 가져오기; 대본 미포함)
 async function importVideo(url){
-  if(USE_BACKEND){
     try{
       const res=await fetch(apiBase()+"/api/import",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
       if(!res.ok) throw new Error("import "+res.status);
       return await res.json();
     }catch(e){ console.error("import failed:",e); return null; }
-  }
-  await sleep(MOCK_DELAY); return null; // mock 모드에선 미지원
 }
 
-/* ── mock 구현 (USE_BACKEND=true 면 호출 안 됨) ───────────── */
-function mockAnalyze(text,type){
-  const key=text.toLowerCase().replace(/[.,!?;:]+$/,"").trim();
-  if(LEX[key]) return {...LEX[key]};
-  return {ko:"",en:"",tag:""};
-}
-function mockSearch({minSec,maxSec,maxLevel,topics}){
-  return RESULTS
-    .filter(r=>{
-      if(r.total<minSec||r.total>maxSec) return false;
-      if(LEVELS.indexOf(r.level)>LEVELS.indexOf(maxLevel)) return false;
-      if(topics.length && !r.topics.some(t=>topics.includes(t))) return false;
-      return true;
-    })
-    .map(({tx,...meta})=>meta); // 실제 /api/search 처럼 대본은 빼고 메타데이터만
-}
-function mockTranscript(videoId){ const r=RESULTS.find(x=>x.id===videoId); return r?r.tx:[]; }
-
-/* ════════════════════════════════════════════════════════
-   MOCK DATA  ←★ 백엔드 붙이면 전부 불필요 (서버가 대체)
-   ════════════════════════════════════════════════════════ */
-const TX_DESERT=[
-  {start:0,end:6,text:"Most people think the desert is completely empty, but that's far from the truth."},
-  {start:6,end:12,text:"Underneath the sand, an entire ecosystem is quietly thriving."},
-  {start:12,end:18,text:"The inevitable outcome of so little rain is that every drop of water becomes precious."},
-  {start:18,end:25,text:"We really look forward to showing you how these animals adapt."},
-  {start:25,end:31,text:"Some of them can go their whole lives without ever drinking water directly."},
-  {start:31,end:37,text:"But there's a catch that nobody really mentions."},
-  {start:37,end:44,text:"When the temperature drops at night, the whole landscape transforms."},
-  {start:44,end:51,text:"Creatures that were hiding all day suddenly come out to hunt."},
-  {start:51,end:58,text:"And that's when the desert truly comes alive."},
-];
-const TX_COFFEE=[
-  {start:0,end:7,text:"To be honest, most of what you've heard about caffeine is a bit of a myth."},
-  {start:7,end:14,text:"It doesn't actually give you energy; it just blocks the signal that makes you feel tired."},
-  {start:14,end:21,text:"So in a sense, you're borrowing alertness that you'll have to pay back later."},
-  {start:21,end:28,text:"That's why the afternoon crash can hit you so hard."},
-  {start:28,end:35,text:"The trick is to wait about ninety minutes after waking before your first cup."},
-  {start:35,end:42,text:"It sounds counterintuitive, but it makes a world of difference."},
-];
-const TX_WAVES=[
-  {start:0,end:8,text:"Have you ever wondered what actually makes an ocean wave?"},
-  {start:8,end:16,text:"It's tempting to think the water travels to the shore, but that's not quite right."},
-  {start:16,end:24,text:"In reality, the water mostly stays put and just moves up and down."},
-  {start:24,end:33,text:"What travels is the energy, passed along from one particle to the next."},
-  {start:33,end:42,text:"By the time it reaches you, that energy may have crossed an entire ocean."},
-];
-const TX_NAMES=[
-  {start:0,end:9,text:"Why is it so easy to forget someone's name right after you hear it?"},
-  {start:9,end:18,text:"The truth is, you were probably never really paying attention in the first place."},
-  {start:18,end:27,text:"When you meet someone, your brain is busy planning what to say next."},
-  {start:27,end:36,text:"So the name goes in one ear and out the other, so to speak."},
-  {start:36,end:46,text:"A simple fix is to repeat the name out loud as soon as you hear it."},
-];
-const TX_ORDER=[
-  {start:0,end:8,text:"Ordering coffee abroad can feel surprisingly stressful at first."},
-  {start:8,end:16,text:"But honestly, a few simple phrases will get you through almost anywhere."},
-  {start:16,end:24,text:"Start with a friendly hello, then just say what you'd like, please."},
-  {start:24,end:33,text:"A smile and a thank you go a long way in any language."},
-];
-const TX_TOKYO=[
-  {start:0,end:9,text:"The fish market wakes up long before the rest of the city does."},
-  {start:9,end:18,text:"By five in the morning, the auction floor is already buzzing with energy."},
-  {start:18,end:27,text:"It's a tradition that has gone on, more or less unchanged, for decades."},
-  {start:27,end:37,text:"And the freshest sushi you'll ever taste is waiting just around the corner."},
-];
-const TX_SOUR=[
-  {start:0,end:9,text:"Sourdough rises without any commercial yeast at all."},
-  {start:9,end:18,text:"Instead, it relies on wild yeast and bacteria living in the starter."},
-  {start:18,end:27,text:"As they feed on the flour, they release gas that gets trapped in the dough."},
-  {start:27,end:36,text:"That's what gives the bread its airy texture and tangy flavor."},
-  {start:36,end:46,text:"Patience is the real ingredient — good bread simply can't be rushed."},
-];
-
-const LEX={
-  "inevitable":{ko:"피할 수 없는, 불가피한",en:"certain to happen; unavoidable",tag:"의무·확신"},
-  "thriving":{ko:"번성하는, 잘 자라는",en:"growing or developing well",tag:"상태"},
-  "precious":{ko:"귀중한, 소중한",en:"of great value",tag:"묘사·설명"},
-  "adapt":{ko:"적응하다",en:"to adjust to new conditions",tag:"변화"},
-  "catch":{ko:"함정, 숨은 문제점",en:"a hidden drawback",tag:"반박·대조"},
-  "transforms":{ko:"완전히 바뀌다",en:"changes completely",tag:"변화"},
-  "ecosystem":{ko:"생태계",en:"a community of living things",tag:""},
-  "creatures":{ko:"생물, 생명체",en:"living things, animals",tag:""},
-  "landscape":{ko:"풍경, 경관",en:"the visible features of an area",tag:""},
-  "look forward to":{ko:"~을 고대하다, 기대하다",en:"to anticipate with pleasure",tag:"부탁·바람"},
-  "far from the truth":{ko:"사실과 거리가 먼",en:"not true at all",tag:"반박·대조"},
-  "that's far from the truth":{ko:"그건 전혀 사실이 아니다",en:"that is not true at all",tag:"반박·대조"},
-  "there's a catch":{ko:"단서가 있다, 함정이 있다",en:"there is a hidden problem",tag:"반박·대조"},
-  "comes alive":{ko:"생기를 띠다, 활기를 띠다",en:"becomes lively and active",tag:"묘사·설명"},
-  "without ever":{ko:"한 번도 ~하지 않고",en:"not at any time",tag:"강조"},
-  "to be honest":{ko:"솔직히 말하면",en:"speaking frankly",tag:"화제 전환"},
-  "a bit of a myth":{ko:"다소 잘못된 통념",en:"largely a false belief",tag:"반박·대조"},
-  "counterintuitive":{ko:"직관에 어긋나는",en:"opposite to what you'd expect",tag:"반박·대조"},
-  "makes a world of difference":{ko:"엄청난 차이를 만든다",en:"has a huge positive effect",tag:"강조"},
-  "in a sense":{ko:"어떤 의미에서는",en:"in one way of looking at it",tag:"강조"},
-  "that's not quite right":{ko:"그게 딱 맞는 말은 아니다",en:"that is not entirely correct",tag:"반박·대조"},
-  "stays put":{ko:"제자리에 머물다",en:"remains in place",tag:"상태"},
-  "in one ear and out the other":{ko:"한 귀로 듣고 한 귀로 흘리다",en:"immediately forgotten",tag:"생각·판단"},
-  "in the first place":{ko:"애초에",en:"to begin with",tag:"강조"},
-  "so to speak":{ko:"말하자면",en:"as it were",tag:"강조"},
-  "go a long way":{ko:"큰 도움이 되다",en:"to be very helpful",tag:"강조"},
-  "get you through":{ko:"~을 헤쳐 나가게 해주다",en:"to help you cope",tag:"시도·노력"},
-  "more or less":{ko:"대체로, 거의",en:"approximately; mostly",tag:"정도·수량"},
-  "around the corner":{ko:"코앞에, 임박한",en:"very near or about to happen",tag:"시간"},
-  "can't be rushed":{ko:"서둘러선 안 된다",en:"needs time; cannot be hurried",tag:"시간"},
-};
-
-const seedClips=()=>[
-  {id:"desert",title:"Why the desert isn't empty",channel:"Nat geo shorts",level:"B1",
-   topics:["자연·환경","과학"],transcript:TX_DESERT,total:58,pos:14,plays:3,
-   vocab:[
-     {id:101,type:"phrase",text:"look forward to",sentence:TX_DESERT[3].text,ts:18,ko:LEX["look forward to"].ko,en:LEX["look forward to"].en,tag:"부탁·바람"},
-     {id:102,type:"word",text:"inevitable",sentence:TX_DESERT[2].text,ts:12,ko:LEX["inevitable"].ko,en:LEX["inevitable"].en,tag:"의무·확신"},
-   ],
-   marks:[{id:201,start:31,end:37,label:TX_DESERT[5].text,note:"there's a catch — 연음 안 들림"}]},
-  {id:"coffee",title:"The caffeine myth, explained",channel:"How things work",level:"B2",
-   topics:["과학","건강"],transcript:TX_COFFEE,total:42,pos:0,plays:0,vocab:[],marks:[]},
-];
-
-const RESULTS=[
-  {id:"waves",title:"How ocean waves really work",channel:"Science simplified",level:"B1",topics:["자연·환경","과학"],total:42,tx:TX_WAVES},
-  {id:"names",title:"Why you forget names instantly",channel:"Mind matters",level:"B2",topics:["과학","심리"],total:46,tx:TX_NAMES},
-  {id:"order",title:"Order coffee like a local",channel:"Travel basics",level:"A2",topics:["여행","일상"],total:33,tx:TX_ORDER},
-  {id:"tokyo",title:"A morning at the Tokyo fish market",channel:"City walks",level:"B1",topics:["여행","일상"],total:37,tx:TX_TOKYO},
-  {id:"sour",title:"The science of sourdough bread",channel:"Kitchen science",level:"B2",topics:["과학","요리"],total:46,tx:TX_SOUR},
-];
-const LEVELS=["A2","B1","B2","C1"];
-const LEVEL_KO=["입문","초급","중급","중상급","고급"];
-const LEVEL_KO_TO_CEFR=["A2","B1","C1"];
+/* 난이도 칩: CEFR 4단계 (검색 편향 + 결과 우선 정렬 기준) */
+const LEVEL_KO=["A2 입문","B1 초급","B2 중급","C1 고급"];
 // 난이도 칩(0~4) → 맞는 CEFR 집합. 분류된 결과를 "선택 난이도 우선"으로 정렬할 때 사용.
 const CEFR_ORDER=["A2","B1","B2","C1"];
-const LVL_TARGET=[["A2"],["A2","B1"],["B1","B2"],["B2","C1"],["C1"]];
+const LVL_TARGET=[["A2"],["B1"],["B2"],["C1"]];
 function sortByLevel(rs,lvl){
   const t=LVL_TARGET[lvl]||[];
   if(!t.length) return rs;
@@ -645,7 +498,6 @@ function Top({screen,onNav,due}){
   return (
     <div className="topbar">
       <span className="brand">Listening Miner</span>
-      {!USE_BACKEND && <span className="modepill">mock 모드</span>}
       <div className="nav">
         <span className={screen==="library"?"on":""} onClick={()=>onNav("library")}>라이브러리</span>
         <span className={screen==="search"?"on":""} onClick={()=>onNav("search")}>검색</span>
@@ -680,7 +532,8 @@ function TodayCard({clips,due,onOpen,onNav}){
       </div>
       <div className="tbar"><i style={{width:pct+"%"}}></i></div>
       <div className="tsub">
-        {min>=goal?"🎉 오늘 목표 달성! ("+min+"분)":"오늘 "+min+"분 / "+goal+"분 듣기"}
+        {min>=goal && due===0 && <b style={{color:"var(--teal)"}}>🎉 오늘 루틴 완료! </b>}
+        듣기 {min}/{goal}분{min>=goal?" ✓":""} · 복습 {due>0?due+"개 남음":"완료 ✓"}
         {" · 새 표현 "+(td.vocab||0)+" · 받아쓰기 "+(td.dict||0)}
       </div>
       <div className="tbtns">
@@ -704,6 +557,9 @@ function Library({clips,onOpen,onSearch,onNav,onRemove,due}){
         <h2>내 라이브러리</h2>
         <span className="sub">클립 {clips.length} · 저장한 표현 {totalVocab}</span>
       </div>
+      {clips.length===0 &&
+        <div className="nores">라이브러리가 비어 있어요.<br/>
+          위 <b>🔍 첫 클립 추가하기</b> 또는 검색 탭에서 관심 있는 영상을 추가해 보세요.</div>}
       <div className="grid">
         {clips.map(c=>{
           const pct=c.total?Math.round(c.pos/c.total*100):0;
@@ -908,8 +764,12 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
   const cur=()=>({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays});
   const save=()=>onClose({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays+(time>2?1:0)});
 
-  const cycleSpeed=()=>{ const seq=[0.75,1,1.25,1.5]; const ns=seq[(seq.indexOf(speed)+1)%seq.length];
+  const cycleSpeed=()=>{ const seq=[0.5,0.75,1,1.25,1.5]; const ns=seq[(seq.indexOf(speed)+1)%seq.length];
     setSpeed(ns); try{ playerRef.current && playerRef.current.setPlaybackRate(ns); }catch(e){} };
+  // 현재 문장 한 번 다시 듣기 (문장 끝에서 자동 정지 — 받아쓰기와 같은 정지 메커니즘)
+  const replaySentence=()=>{ const l=TX[curIdx>=0?curIdx:0]; if(!l) return;
+    dictStopRef.current=(l.end&&l.end>l.start)?l.end:l.start+6;
+    seek(l.start); try{ playerRef.current && playerRef.current.playVideo(); }catch(e){} setPlaying(true); };
   const goVocab=()=>{ setTab("vocab"); try{ panelRef.current && panelRef.current.scrollIntoView({behavior:"smooth",block:"start"}); }catch(e){} };
 
   /* 저장: 카드 먼저 띄우고(optimistic) → analyze 비동기 → 결과 채움. 실수 탭 대비 실행취소 제공 */
@@ -922,7 +782,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
       ()=>{ setVocab(v=>v.filter(x=>x.id!==id)); setToast(""); setToastAct(null); });
     const a=await analyze(text,type);
     setVocab(v=>v.map(x=>x.id===id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
-    if(USE_BACKEND && !getAnthropicKey() && !a.ko && !a.en && !a.tag)
+    if(!getAnthropicKey() && !a.ko && !a.en && !a.tag)
       flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 자동 분석돼요");
   };
   const setTag=(id,tag)=>setVocab(v=>v.map(x=>x.id===id?{...x,tag}:x));
@@ -931,7 +791,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
     setVocab(v=>v.map(x=>x.id===it.id?{...x,loading:true}:x));
     const a=await analyze(it.text,it.type);
     setVocab(v=>v.map(x=>x.id===it.id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
-    if(USE_BACKEND && !getAnthropicKey() && !a.ko && !a.en && !a.tag)
+    if(!getAnthropicKey() && !a.ko && !a.en && !a.tag)
       flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 분석돼요");
   };
   const onWord=(li,wi,tok)=>{
@@ -989,6 +849,8 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
           </div>
           <div className="ctrl">
             <span className="pill" onClick={cycleSpeed}>{speed.toFixed(2).replace(/0$/,"")}x</span>
+            <span className="sep"></span>
+            <span className="pill" title="현재 문장 다시 듣기 (끝에서 자동 정지)" onClick={replaySentence}>↻ 문장</span>
             <span className="sep"></span>
             <span className="pill" onClick={goVocab}>📒 어휘 {vocab.length}</span>
             <span className="sep"></span>
@@ -1437,9 +1299,6 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
         <div style={{textAlign:"center",marginTop:"14px"}}>
           <span className="addbtn" onClick={moreResults}>🔄 다른 결과 보기</span>
         </div>}
-      <div className="note-mock" style={{marginTop:"16px"}}>
-        {USE_BACKEND?"백엔드 연동됨":"mock 모드 — searchVideos()·fetchTranscript() 가 백엔드 호출로 교체될 자리"}
-      </div>
     </div>
   );
 }
@@ -1613,7 +1472,7 @@ function loadClips(){
     const raw = localStorage.getItem(STORE_KEY);
     if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return measureClips(dedupeIds(v)); }
   }catch(e){ console.error("library load 실패:", e); }
-  return seedClips();            // 저장된 게 없으면 시드(예시) 라이브러리
+  return [];                     // 첫 실행은 빈 라이브러리 — 오늘 카드가 "첫 클립 추가" 안내
 }
 function saveClips(clips){
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(clips)); }
@@ -1986,7 +1845,7 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
   // 모달을 열 때 최신 상태 반영 (계정 동기화로 키·주소가 바뀌었을 수 있음)
   useEffect(()=>{ if(open){ setSdHas(!!getSupadataKey()); setApi(getApiUrl()); setApiSaved(false); } },[open]);
   const connected=gistConnected();
-  const needKey = USE_BACKEND && !hasKey;
+  const needKey = !hasKey;
   return (<>
     <button className="sync-fab" title="설정 (API 키·동기화)" onClick={()=>setOpen(o=>!o)}>
       <span className={"sync-dot s-"+(needKey?"error":(sync.state||"idle"))}></span>⚙

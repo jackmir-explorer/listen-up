@@ -35,14 +35,13 @@ function guessLevel(title) {
 // 무발화/이완 콘텐츠(난이도와 무관하게 듣기 학습 대상이 아님) — 결과에서 제외.
 const NOSPEECH = /asmr|lo-?fi|white noise|brown noise|pink noise|nature sounds?|ocean sounds?|forest sounds?|rain (sounds?|ambience)|relaxing music|sleep music|study music|calm(ing)? music|ambient music|meditation music|piano music|\binstrumental\b|no talking|no commentary|music to (study|sleep|relax|work)/i;
 
-// 난이도(0~4) → 검색어 편향. 낮을수록 쉽고 느린 영어, 높을수록 복잡한 원어민 콘텐츠.
-// (정확한 CEFR 측정은 불가하므로 "결과 필터"가 아니라 "검색 편향"으로 처리)
+// 난이도(0~3 = A2·B1·B2·C1) → 검색어 편향. 결과 필터가 아니라 "검색 편향"으로 처리하고,
+// 실제 선별은 프런트가 분류(제목 LLM)·실측(자막) 레벨로 정렬한다.
 const LEVEL_HINTS = [
-  "slow easy english for beginners", // 0 입문
-  "easy english conversation",       // 1 초급
-  "",                                // 2 중급 (편향 없음 = 일반 콘텐츠)
-  "interview discussion",            // 3 중상급
-  "advanced in-depth lecture",       // 4 고급
+  "slow easy english for beginners", // 0 A2
+  "easy english conversation",       // 1 B1
+  "",                                // 2 B2 (편향 없음 = 일반 원어민 콘텐츠)
+  "advanced in-depth lecture",       // 3 C1
 ];
 
 function shuffle(arr) {
