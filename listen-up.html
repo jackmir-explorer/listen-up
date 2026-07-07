@@ -1690,8 +1690,10 @@ async function cloudPush(clips){
   cur.forEach(d=>{ if(!keep.has(d.id)) batch.delete(d.ref); });   // 삭제된 클립 정리
   for(const c of clips||[]) batch.set(root.collection("clips").doc(String(c.id)), _clean(c));
   let topics=null; try{ topics=JSON.parse(localStorage.getItem("listen-up.topics")||"null"); }catch(e){}
+  // API 키도 계정에 저장 (Firestore 규칙상 본인만 읽기 가능) — 어느 기기든 로그인만 하면 적용
   batch.set(root, _clean({ updatedAt, stats:loadStats(),
-    settings:{ goalMin:getGoalMin(), apiBase:getApiUrl(), topics, qhist:loadQHist() } }));
+    settings:{ goalMin:getGoalMin(), apiBase:getApiUrl(), topics, qhist:loadQHist(),
+      anthKey:getAnthropicKey(), supKey:getSupadataKey() } }));
   await batch.commit();
   localStorage.setItem(TS_KEY,String(updatedAt));
   return updatedAt;
@@ -1705,7 +1707,8 @@ async function cloudPull(){
   const clips=[]; snap.forEach(x=>clips.push(x.data()));
   return { updatedAt:Number(d.updatedAt)||0, clips, stats:d.stats||null, settings:d.settings||null };
 }
-// 내려받은 통계·설정을 이 기기에 적용 (키·토큰은 동기화 대상 아님 — 기기별 보관)
+// 내려받은 통계·설정을 이 기기에 적용. API 키는 계정 값이 있으면 채택(계정이 기준) —
+// 로그인한 본인의 키가 어느 기기에서든 따라온다. (Gist 토큰은 기기별 보관 유지)
 function applyCloudExtras(r){ try{
   if(r.stats && r.stats.days) localStorage.setItem(STATS_KEY,JSON.stringify(r.stats));
   const s=r.settings||{};
@@ -1713,6 +1716,8 @@ function applyCloudExtras(r){ try{
   if(s.apiBase && !getApiUrl()) setApiUrl(s.apiBase);          // 이 기기에 이미 설정돼 있으면 유지
   if(Array.isArray(s.topics)&&s.topics.length) localStorage.setItem("listen-up.topics",JSON.stringify(s.topics));
   if(Array.isArray(s.qhist)) localStorage.setItem(QHIST_KEY,JSON.stringify(s.qhist));
+  if(typeof s.anthKey==="string" && s.anthKey) setAnthropicKey(s.anthKey);
+  if(typeof s.supKey==="string" && s.supKey) setSupadataKey(s.supKey);
 }catch(e){} }
 
 /* ── 공유 자막 캐시 (Firestore transcripts/{videoId}) ─────────────
@@ -1784,6 +1789,8 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
   const [fbTxt,setFbTxt]=useState("");
   const saveFbCfg=()=>{ if(setFirebaseConfig(fbTxt)){ setFbCfg(true); setFbTxt(""); location.reload(); }
     else window.alert("설정을 읽지 못했어요. Firebase 콘솔의 firebaseConfig = { … } 부분을 그대로 붙여넣어 주세요."); };
+  // 모달을 열 때 최신 상태 반영 (계정 동기화로 키·주소가 바뀌었을 수 있음)
+  useEffect(()=>{ if(open){ setSdHas(!!getSupadataKey()); setApi(getApiUrl()); setApiSaved(false); } },[open]);
   const connected=gistConnected();
   const needKey = USE_BACKEND && !hasKey;
   return (<>
@@ -1842,7 +1849,8 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
             <p className="sync-p">없어도 PC(터널) 백엔드에선 자막이 되지만, <b>클라우드 백엔드에서 자막을 받으려면</b> 필요합니다(무료 월 100건).</p>
             <input className="sync-in" type="password" placeholder="Supadata API 키 붙여넣기"
               value={sdKey} onChange={e=>setSdKey(e.target.value)}/>
-            <button className="sync-btn primary" onClick={()=>{ setSupadataKey(sdKey.trim()); setSdHas(!!getSupadataKey()); setSdKey(""); }}>저장</button>
+            <button className="sync-btn primary" onClick={()=>{ setSupadataKey(sdKey.trim()); setSdHas(!!getSupadataKey()); setSdKey("");
+              if(user && onPush) onPush(); }}>저장</button>
             <a className="sync-link" href="https://supadata.ai" target="_blank" rel="noreferrer">키 발급하기 (무료) →</a>
           </>}
 
@@ -1873,7 +1881,7 @@ function Settings({sync,open,setOpen,hasKey,onSaveKey,onSaveApiUrl,onConnect,onD
           </>}
           </>}
 
-          <p className="sync-note">키·토큰은 이 기기 브라우저(localStorage)에만 저장됩니다. 공용 PC 에선 사용 후 지우세요.</p>
+          <p className="sync-note">API 키는 이 기기에 저장되고, <b>Google 로그인 중에는 내 계정에도 저장</b>돼 다른 기기에서 로그인하면 자동 적용됩니다. <b>로그아웃하면 이 기기에서 키가 지워져요</b> (공용 기기 보호 — 재로그인 시 자동 복원). Gist 토큰은 이 기기에만 저장됩니다.</p>
         </div>
       </div>
     )}
@@ -1889,7 +1897,8 @@ function App(){
   const [sync,setSync]=useState({state: gistConnected()?"syncing":"idle", msg:""});
   const [syncOpen,setSyncOpen]=useState(false);
   const [hasKey,setHasKey]=useState(!!getAnthropicKey());
-  const saveKey=k=>{ setAnthropicKey(k); setHasKey(!!getAnthropicKey()); };
+  const saveKey=k=>{ setAnthropicKey(k); setHasKey(!!getAnthropicKey());
+    if(userRef.current) cloudPush(clipsRef.current).catch(()=>{}); }; // 로그인 중이면 계정에도 저장
   const clipsRef=useRef(clips); clipsRef.current=clips;
   const syncedOnce=useRef(false);
   const skipPush=useRef(false);
@@ -1933,7 +1942,7 @@ function App(){
         const remoteTs=Number((doc.data()||{}).updatedAt)||0;
         if(remoteTs>localTS()){
           const r=await cloudPull();
-          if(r){ applyRemote(r); applyCloudExtras(r); setSync({state:"ok",msg:"내려받음"}); }
+          if(r){ applyRemote(r); applyCloudExtras(r); setHasKey(!!getAnthropicKey()); setSync({state:"ok",msg:"내려받음"}); }
         }
       }catch(e){ /* 오프라인 등 — 조용히 넘어감 */ }
     };
@@ -1944,14 +1953,18 @@ function App(){
     setSync({state:"syncing",msg:"계정 동기화 중…"});
     try{
       const r=await cloudPull();
-      if(r && r.updatedAt>localTS()){ applyRemote(r); applyCloudExtras(r); setSync({state:"ok",msg:"내려받음"}); }
+      if(r && r.updatedAt>localTS()){ applyRemote(r); applyCloudExtras(r); setHasKey(!!getAnthropicKey()); setSync({state:"ok",msg:"내려받음"}); }
       else { await cloudPush(clipsRef.current); setSync({state:"ok",msg:"백업됨"}); }
       syncedOnce.current=true;
     }catch(e){ setSync({state:"error",msg:String(e.message||e)}); }
   };
   const doLogin=async()=>{ try{ await googleSignIn(); }
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
-  const doLogout=async()=>{ try{ await googleSignOut(); setSync({state:"idle",msg:""}); }catch(e){} };
+  const doLogout=async()=>{ try{ await googleSignOut(); }catch(e){}
+    // 공용 기기 보호: 로그아웃하면 이 기기의 AI 키를 지운다.
+    // (키는 계정에 저장돼 있어 다시 로그인하면 자동 복원 — 다음 사용자가 내 키를 못 쓰게)
+    setAnthropicKey(""); setSupadataKey(""); setHasKey(false);
+    setSync({state:"idle",msg:""}); };
 
   // 마운트 시 1회: Gist 와 초기 동기화 (원격이 더 새것이면 내려받고, 아니면 백업)
   useEffect(()=>{
@@ -1994,7 +2007,7 @@ function App(){
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
   const pullNow=async()=>{ if(!remoteConnected())return; setSync({state:"syncing",msg:"불러오는 중…"});
     try{ const r=userRef.current?await cloudPull():await gistPull();
-      if(r){ applyRemote(r); if(userRef.current) applyCloudExtras(r); setSync({state:"ok",msg:"내려받음"}); }
+      if(r){ applyRemote(r); if(userRef.current){ applyCloudExtras(r); setHasKey(!!getAnthropicKey()); } setSync({state:"ok",msg:"내려받음"}); }
       else setSync({state:"ok",msg:"원격 비어있음"}); }
     catch(e){ setSync({state:"error",msg:String(e.message||e)}); } };
   const connectGist=async(t)=>{ setSyncOpen(false); setGistToken(t);
