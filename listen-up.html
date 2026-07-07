@@ -380,12 +380,17 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
 //   → { ko:string, en:string, tag:string }   (tag 는 FUNCTION_TAGS 안의 값 또는 "")
 async function analyze(text, type){
   if(USE_BACKEND){
+    // 0) 공유 분석 캐시 — 누군가 이미 분석한 단어·구문이면 API 호출 없이 즉시 반환
+    const hit=await cacheGetAnalyze(text,type);
+    if(hit) return hit;
     try{
       const res=await fetch(apiBase()+"/api/analyze",{method:"POST",
         headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
         body:JSON.stringify({text,type})});
       if(!res.ok) throw new Error("analyze "+res.status);
-      return await res.json();
+      const a=await res.json();
+      if(a&&(a.ko||a.en)) cacheSetAnalyze(text,type,a); // 백그라운드 캐시 저장
+      return a;
     }catch(e){ console.error("analyze failed:",e); return {ko:"",en:"",tag:""}; }
   }
   await sleep(MOCK_DELAY); return mockAnalyze(text,type);
@@ -1742,6 +1747,35 @@ async function cacheSetTranscript(videoId,segs){
     await fb.firestore().collection("transcripts").doc(String(videoId))
       .set({ segs:JSON.parse(raw), updatedAt:Date.now() });
   }catch(e){ /* 실패해도 학습엔 지장 없음 */ }
+}
+
+/* ── 공유 분석 캐시 (Firestore analyze/{type:표현}) ─────────────────
+   같은 단어·구문의 뜻·태그는 전 세계에서 1번만 분석 — Anthropic 비용 대폭 절감.
+   문장(sentence)은 겹칠 일이 거의 없어 캐시하지 않는다. */
+function analyzeCacheId(text,type){
+  if(type==="sentence") return null;
+  const t=String(text||"").toLowerCase().trim().replace(/\s+/g," ");
+  if(!t || t.length>120) return null;
+  return type+":"+t.replace(/[\/#?%\[\]]/g,"_"); // Firestore 문서 id 금지문자 치환
+}
+async function cacheGetAnalyze(text,type){
+  const id=analyzeCacheId(text,type); if(!id||!getFirebaseConfig()) return null;
+  try{
+    const fb=await loadFirebase();
+    const doc=await fb.firestore().collection("analyze").doc(id).get();
+    if(doc.exists){ const d=doc.data()||{}; if(d.ko||d.en) return {ko:d.ko||"",en:d.en||"",tag:d.tag||""}; }
+  }catch(e){}
+  return null;
+}
+async function cacheSetAnalyze(text,type,a){
+  if(!a||(!a.ko&&!a.en)) return;
+  const id=analyzeCacheId(text,type); if(!id||!getFirebaseConfig()) return;
+  try{
+    const fb=await loadFirebase();
+    if(!fb.auth().currentUser) return; // 쓰기는 로그인 필요(규칙)
+    await fb.firestore().collection("analyze").doc(id)
+      .set({ko:a.ko||"",en:a.en||"",tag:a.tag||"",updatedAt:Date.now()});
+  }catch(e){}
 }
 
 /* 첫 화면 로그인 게이트 — 로그인(또는 게스트 선택) 후에 앱 기능이 열린다 */

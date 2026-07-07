@@ -22,7 +22,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const PORT = process.env.PORT || 3001;
-const MODEL = "claude-sonnet-4-6"; // 요청하신 sonnet 계열. 바꾸려면 이 한 줄만 수정.
+// 어휘 뜻·태그 분석과 토픽 번역은 Haiku 로 충분 — Sonnet 대비 비용 약 1/5~1/10.
+// 품질을 올리고 싶으면 이 한 줄만 "claude-sonnet-4-6" 으로.
+const MODEL = "claude-haiku-4-5-20251001";
 
 // API 키는 두 곳에서 받는다:
 //   (1) 요청 헤더 x-anthropic-key — 앱 ⚙ 설정에서 입력 (권장; .env 불필요)

@@ -39,12 +39,18 @@ Listening Miner 의 Google 계정 동기화는 **Firebase**(구글의 무료 앱
          allow read: if true;
          allow write: if request.auth != null;
        }
+       match /analyze/{expr} {
+         allow read: if true;
+         allow write: if request.auth != null;
+       }
      }
    }
    ```
    > `users/…` 는 각 사용자가 **자기 데이터만** 접근.
    > `transcripts/…` 는 **공유 자막 캐시** — 한 명이 뽑은 자막을 모두가 재사용해
    > Supadata 월 한도를 아낍니다 (읽기는 누구나, 쓰기는 로그인 사용자만).
+   > `analyze/…` 는 **공유 분석 캐시** — 같은 단어·구문의 뜻·태그를 전 세계에서
+   > 1번만 분석해 Anthropic 비용을 아낍니다.
 
 ## 5. 앱에 연결
 1. 앱(https://jackmir-explorer.github.io/listen-up/) → **⚙ 설정 → Google 계정**
