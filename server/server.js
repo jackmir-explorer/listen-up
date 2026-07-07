@@ -117,6 +117,53 @@ app.post("/api/transcript", async (req, res) => {
   }
 });
 
+// ── POST /api/level-titles ────────────────────────────────────────
+// body: { items:[{id,title,channel}] } → { levels:{ [id]:"A2"|"B1"|"B2"|"C1" } }
+// 검색 결과의 듣기 난이도를 제목·채널로 대략 분류(Haiku·캐시). 키 없으면 빈 결과.
+// (정밀 난이도는 클립 추가 시 프런트가 자막으로 실측 — WPM+문장 복잡도)
+const LEVEL_MODEL = "claude-haiku-4-5-20251001";
+const _levelCache = new Map();
+const LEVELS_SCHEMA = {
+  type: "object",
+  properties: { levels: { type: "array", items: {
+    type: "object",
+    properties: { id: { type: "string" }, level: { type: "string", enum: ["A2", "B1", "B2", "C1"] } },
+    required: ["id", "level"], additionalProperties: false } } },
+  required: ["levels"], additionalProperties: false,
+};
+app.post("/api/level-titles", async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 40) : [];
+  const out = {};
+  const todo = [];
+  for (const it of items) {
+    const id = String(it?.id || ""); if (!id) continue;
+    if (_levelCache.has(id)) out[id] = _levelCache.get(id);
+    else todo.push({ id, title: String(it.title || "").slice(0, 120), channel: String(it.channel || "").slice(0, 60) });
+  }
+  const apiKey = resolveKey(req);
+  if (todo.length && !keyError(apiKey)) {
+    try {
+      const anthropic = new Anthropic({ apiKey });
+      const msg = await anthropic.messages.create({
+        model: LEVEL_MODEL,
+        max_tokens: 2048,
+        system:
+          "Estimate the English listening difficulty (CEFR) of each YouTube video for language learners, using only its title and channel name. A2 = slow, simple learner content; B1 = clear everyday speech; B2 = natural native speed on general topics; C1 = fast, dense, or technical native content. Return a level for every id you were given.",
+        output_config: { format: { type: "json_schema", schema: LEVELS_SCHEMA } },
+        messages: [{ role: "user", content: JSON.stringify(todo) }],
+      });
+      const block = msg.content.find((b) => b.type === "text");
+      const parsed = JSON.parse(block?.text || "{}");
+      for (const l of parsed.levels || []) {
+        if (l && l.id && ["A2", "B1", "B2", "C1"].includes(l.level)) { _levelCache.set(l.id, l.level); out[l.id] = l.level; }
+      }
+    } catch (e) {
+      console.error("level-titles 실패:", e?.message || e);
+    }
+  }
+  return res.json({ levels: out });
+});
+
 // 한글 토픽 → 영어 검색어. 결과 캐시. 키 없으면(또는 영어면) 원문 그대로.
 // mode "study": 영어 학습 콘텐츠 쪽으로 번역 편향 / "general": 중립 번역(주제 그대로)
 const _topicCache = new Map();

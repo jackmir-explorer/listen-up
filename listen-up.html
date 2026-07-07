@@ -419,6 +419,19 @@ async function searchVideos(filters, onResult){
   await sleep(120); const r=mockSearch(filters); if(onResult) r.forEach(onResult); return r;
 }
 
+// POST /api/level-titles   body:{ items:[{id,title,channel}] } → { levels:{id:"A2"|"B1"|"B2"|"C1"} }
+// 검색 결과의 난이도를 제목 기반으로 대략 분류 (서버 캐시·Haiku). 키 없거나 실패 시 {}.
+async function classifyLevels(items){
+  if(!USE_BACKEND || !items.length || !ANTHROPIC_KEY) return {};
+  try{
+    const res=await fetch(apiBase()+"/api/level-titles",{method:"POST",
+      headers:{"Content-Type":"application/json","x-anthropic-key":ANTHROPIC_KEY},
+      body:JSON.stringify({items:items.map(r=>({id:r.id,title:r.title,channel:r.channel}))})});
+    if(!res.ok) return {};
+    return (await res.json()).levels||{};
+  }catch(e){ return {}; }
+}
+
 // POST /api/transcript   body:{ videoId }
 //   → [{ start:seconds, end:seconds, text }]
 //   ⚠ 유튜브 자막은 공식 API가 없어 비공식 추출에 의존 → 가장 잘 깨지는 지점. 실패 시 [] 반환·UI 처리 필요.
@@ -586,6 +599,17 @@ const RESULTS=[
 const LEVELS=["A2","B1","B2","C1"];
 const LEVEL_KO=["입문","초급","중급","중상급","고급"];
 const LEVEL_KO_TO_CEFR=["A2","B1","C1"];
+// 난이도 칩(0~4) → 맞는 CEFR 집합. 분류된 결과를 "선택 난이도 우선"으로 정렬할 때 사용.
+const CEFR_ORDER=["A2","B1","B2","C1"];
+const LVL_TARGET=[["A2"],["A2","B1"],["B1","B2"],["B2","C1"],["C1"]];
+function sortByLevel(rs,lvl){
+  const t=LVL_TARGET[lvl]||[];
+  if(!t.length) return rs;
+  const rank=r=>{ if(!r.level) return 1.5;                                  // 미상: 중간
+    if(t.includes(r.level)) return 0;                                        // 딱 맞음: 맨 위
+    return 1+Math.min(...t.map(x=>Math.abs(CEFR_ORDER.indexOf(x)-CEFR_ORDER.indexOf(r.level)))); };
+  return [...rs].sort((a,b)=>rank(a)-rank(b));                               // 안정 정렬: 순위 내 순서 유지
+}
 
 const fmt=s=>{ s=Math.max(0,Math.floor(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
 const clean=t=>t.replace(/^[^A-Za-z'’-]+|[^A-Za-z'’-]+$/g,"");
@@ -1182,13 +1206,19 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
   // 필터 바뀌면 page 0 으로
   useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics,qDone,sort,mode]);
   // 검색 (검색어·필터·page 변동 시) — 350ms 디바운스 + 결과 스트리밍(오는 대로 추가)
+  // 스트림이 끝나면 제목 기반 난이도 분류(Haiku·캐시) → 배지 갱신 + 선택 난이도 우선 정렬
   useEffect(()=>{
     let alive=true; setLoading(true);
     const t=setTimeout(()=>{ if(!alive) return;
       setResults([]);
+      const got=[];
       searchVideos({q:qDone,minSec:minM*60,maxSec:maxM*60,level:lvl,topics,sort,mode,page},
-        item=>{ if(alive) setResults(rs=>[...rs,item]); })
-        .then(()=>{ if(alive) setLoading(false); })
+        item=>{ if(alive){ got.push(item); setResults(rs=>[...rs,item]); } })
+        .then(async()=>{ if(!alive) return; setLoading(false);
+          const lv=await classifyLevels(got.filter(r=>!r.level));
+          if(!alive) return;
+          setResults(rs=>sortByLevel(rs.map(r=>lv[r.id]?{...r,level:lv[r.id]}:r), lvl));
+        })
         .catch(()=>{ if(alive) setLoading(false); });
     },350);
     return ()=>{ alive=false; clearTimeout(t); };
@@ -1256,6 +1286,7 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
           <span className="flab">난이도</span>
           <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
             {LEVEL_KO.map((t,i)=><span key={t} className={"chip"+(lvl===i?" on":"")} onClick={()=>setLvl(i)}>{t}</span>)}
+            <span className="resmeta">맞는 난이도({(LVL_TARGET[lvl]||[]).join("·")})가 위로 정렬돼요</span>
           </div>
         </div>
         <div className="frow">
@@ -1393,6 +1424,37 @@ function Browse({clips,onNav,onOpenAt,due}){
 /* ── 로컬 영속화: 라이브러리(clips)를 localStorage 에 저장·복원 ──
    study-app 방식(단일 파일 + localStorage). 기기 간 백업은 아래 Gist 동기화로 확장됨. */
 const STORE_KEY = "listen-up.library.v1";
+
+/* 자막으로 실측 난이도(CEFR) 계산 — 말 속도(WPM) + 문장 복잡도(Flesch-Kincaid 근사).
+   LLM 불필요(무료·즉시). 제목 기반 추정보다 정확해 클립 추가 시 레벨을 덮어쓴다. */
+function measureLevel(tx){
+  if(!Array.isArray(tx)||tx.length<4) return "";
+  const text=tx.map(s=>s.text).join(" ");
+  const words=text.split(/\s+/).filter(Boolean);
+  const n=words.length; if(n<60) return "";
+  const dur=(Number(tx[tx.length-1].end)||Number(tx[tx.length-1].start))-Number(tx[0].start);
+  const wpm=dur>30 ? n/(dur/60) : 0;
+  const punct=(text.match(/[.!?]+/g)||[]).length;
+  const sentences=punct>=tx.length*0.5 ? punct : tx.length;   // 부호 없으면 세그먼트≈문장
+  const syl=w=>{ w=w.toLowerCase().replace(/[^a-z]/g,""); if(!w) return 0;
+    const m=w.match(/[aeiouy]{1,2}/g); let c=m?m.length:1; if(w.endsWith("e")&&c>1)c--; return Math.max(1,c); };
+  const fk=0.39*(n/Math.max(1,sentences))+11.8*(words.reduce((s,w)=>s+syl(w),0)/n)-15.59;
+  let score=0;
+  score += wpm>=170?3 : wpm>=145?2 : wpm>=115?1 : 0;          // 말 속도
+  score += fk>=11?3 : fk>=8?2 : fk>=5?1 : 0;                  // 문장·어휘 복잡도
+  return ["A2","B1","B1","B2","B2","C1","C1"][score]||"B1";
+}
+// 기존 클립도 로드 시 1회 실측 (자막이 이미 저장돼 있으므로 무료)
+function measureClips(clips){
+  for(const c of (clips||[])){
+    if(!c.lvlMeasured && Array.isArray(c.transcript) && c.transcript.length>3){
+      const lv=measureLevel(c.transcript);
+      if(lv){ c.level=lv; c.lvlMeasured=true; }
+    }
+  }
+  return clips;
+}
+
 // 과거 버그(uid 카운터 리셋)로 생긴 중복 id 를 로드 시 정리 — 복습 누락 방지.
 function dedupeIds(clips){
   const seen=new Set();
@@ -1405,7 +1467,7 @@ function dedupeIds(clips){
 function loadClips(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
-    if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return dedupeIds(v); }
+    if(raw){ const v = JSON.parse(raw); if(Array.isArray(v) && v.length) return measureClips(dedupeIds(v)); }
   }catch(e){ console.error("library load 실패:", e); }
   return seedClips();            // 저장된 게 없으면 시드(예시) 라이브러리
 }
@@ -1975,7 +2037,9 @@ function App(){
     const tx=await fetchTranscript(r.id);
     // 길이(total)를 못 받은 경우(oEmbed 폴백 등) 대본 끝 시간으로 추정 → "0:00" 방지
     const total=r.total || (tx.length?Math.round(tx[tx.length-1].end):0);
-    const clip={id:r.id,title:r.title,channel:r.channel,level:r.level,topics:r.topics,
+    // 자막 기반 실측 난이도(말 속도+문장 복잡도)가 제목 추정보다 정확 → 있으면 덮어씀
+    const lv=measureLevel(tx);
+    const clip={id:r.id,title:r.title,channel:r.channel,level:lv||r.level,lvlMeasured:!!lv,topics:r.topics,
       transcript:tx,total,pos:0,plays:0,vocab:[],marks:[]};
     setClips(cs=>cs.some(c=>c.id===clip.id)?cs:[...cs,clip]);
     setOpenSeek(null); setOpenId(clip.id); setScreen("study");
