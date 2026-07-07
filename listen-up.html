@@ -599,7 +599,7 @@ function Library({clips,onOpen,onSearch,onNav,onRemove,due}){
                 <div className="tags">{c.topics.map(t=><span className="t" key={t}>{t}</span>)}</div>
                 <div className="meta">
                   <span><b>{c.vocab.length}</b> 표현</span>
-                  <span><b>{c.marks.length}</b> 책갈피</span>
+                  <span><b>{c.marks.length}</b> 안 들림</span>
                   <span>{c.plays>0?c.plays+"회 들음":"새 클립"}</span>
                 </div>
                 {c.pos>0 && c.pos<c.total && <div className="cont">▶ 이어듣기 {fmt(c.pos)}</div>}
@@ -895,7 +895,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
 
   const bookmarkSeg=()=>{ const l=TX[curIdx>=0?curIdx:0];
     setMarks(m=>[{id:uid(),start:l.start,end:l.end,label:l.text,note:""},...m]);
-    setTab("bookmark"); flash("책갈피 · "+fmt(l.start)+"–"+fmt(l.end)); };
+    setTab("bookmark"); flash("🙉 안 들린 문장으로 저장 — 복습 때 다시 듣기로 나와요"); };
   const playSeg=(s)=>{ seek(s);
     try{ playerRef.current && playerRef.current.playVideo(); }catch(e){} setPlaying(true); };
 
@@ -918,7 +918,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
             <span className="sep"></span>
             <span className="pill" onClick={goVocab}>📒 어휘 {vocab.length}</span>
             <span className="sep"></span>
-            <span className="pill" onClick={bookmarkSeg}>🔖 책갈피</span>
+            <span className="pill" title="지금 문장이 안 들리면 탭 — 복습에서 다시 듣기 시험으로 나와요" onClick={bookmarkSeg}>🙉 안 들려요</span>
             <span className="sep"></span>
             <span className={"pill"+(phraseMode?" on":"")} onClick={()=>{setPhraseMode(m=>!m);setAnchor(null);}}>구문 잡기</span>
             <span className="sep"></span>
@@ -989,7 +989,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
         <div className="card panel" ref={panelRef}>
           <div className="tabs">
             <div className={tab==="vocab"?"on":""} onClick={()=>setTab("vocab")}>어휘<span className="cnt">{vocab.length}</span></div>
-            <div className={tab==="bookmark"?"on":""} onClick={()=>setTab("bookmark")}>책갈피<span className="cnt">{marks.length}</span></div>
+            <div className={tab==="bookmark"?"on":""} onClick={()=>setTab("bookmark")}>안 들림<span className="cnt">{marks.length}</span></div>
           </div>
           {tab==="vocab" ? (
             <div className="list">
@@ -998,7 +998,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
             </div>
           ) : (
             <div className="list">
-              {marks.length===0 && <div className="empty">🔖 책갈피를 누르면<br/>그 구간이 여기 저장돼요</div>}
+              {marks.length===0 && <div className="empty">안 들리는 문장에서 🙉 를 누르면<br/>여기 모이고, 복습 때 다시 듣기 시험으로 나와요</div>}
               {marks.map(m=>(
                 <div className="item" key={m.id}>
                   <span className="x" onClick={()=>setMarks(v=>v.filter(x=>x.id!==m.id))}>✕</span>
@@ -1012,7 +1012,7 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
             </div>
           )}
           <div className="foot">
-            <div className="row"><span>이 클립 저장 {vocab.length}</span><span>책갈피 {marks.length}</span></div>
+            <div className="row"><span>이 클립 저장 {vocab.length}</span><span>안 들림 {marks.length}</span></div>
             <button className="review" onClick={()=>onReview(cur())}>
               ▶ 이 클립 복습{vocab.length>0?" · "+vocab.length+"개":""}</button>
             <div className="note-mock">닫으면 이 클립에 저장돼 라이브러리에서 이어집니다</div>
@@ -1144,7 +1144,7 @@ function ReviewMode({cards,sourceLabel,nextDue,more,onMore,onExit,onGrade}){
       <div className="rv-card">
         {!revealed ? <>
           {isMark ? <>
-            <div className="rv-hw" style={{fontSize:"19px"}}>🔖 안 들렸던 구간</div>
+            <div className="rv-hw" style={{fontSize:"19px"}}>🙉 안 들렸던 문장</div>
             {rvBadge}
             <div className="rv-q">다시 듣고 이해해 보세요{cur.note?<><br/><span style={{color:"var(--hint)"}}>메모: {cur.note}</span></>:null}</div>
             {playBtn("🔊 구간 듣기")}
