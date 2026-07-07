@@ -186,8 +186,10 @@
   .rv-bar i{display:block;height:100%;background:var(--info);transition:width .25s;}
   .rv-bar-txt{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
   .rv-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:30px 24px;text-align:center;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-  .rv-play{width:64px;height:64px;border-radius:50%;background:#2c2c2a;color:#fff;font-size:24px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;}
-  .rv-play:hover{background:#41413d;}
+  .rv-play{margin-top:18px;min-height:46px;border-radius:999px;background:var(--info);color:#fff;
+    font-size:14.5px;font-weight:600;font-family:inherit;border:none;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:12px 26px;white-space:nowrap;}
+  .rv-play:hover{filter:brightness(1.07);}
   .rv-seg{font-size:11px;color:var(--hint);margin-top:10px;font-variant-numeric:tabular-nums;}
   .rv-q{font-size:13px;color:var(--muted);margin-top:18px;}
   .rv-show{margin-top:20px;font-size:13px;color:var(--info);background:var(--info-bg);border:1px solid var(--info-bd);border-radius:9px;padding:9px 22px;cursor:pointer;font-family:inherit;font-weight:600;}
@@ -198,8 +200,8 @@
   .rv-ctx{font-size:13px;color:var(--muted);margin-top:16px;line-height:1.6;max-width:440px;}
   .rv-ctx mark{background:var(--mark-bg);padding:0 2px;border-radius:3px;}
   .rv-replay{margin-top:16px;font-size:12px;color:var(--info);cursor:pointer;background:none;border:none;font-family:inherit;}
-  .rv-rate{display:flex;gap:10px;margin-top:24px;}
-  .rv-rate button{font-family:inherit;font-size:13px;font-weight:600;padding:11px 0;width:96px;border-radius:10px;cursor:pointer;border:1px solid var(--border2);background:var(--surface);}
+  .rv-rate{display:flex;gap:8px;margin-top:24px;width:100%;max-width:380px;}
+  .rv-rate button{flex:1;min-width:0;font-family:inherit;font-size:13px;font-weight:600;padding:11px 4px;border-radius:10px;cursor:pointer;border:1px solid var(--border2);background:var(--surface);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .rv-again{color:var(--danger);border-color:var(--again-bd);} .rv-again:hover{background:var(--again-bg);}
   .rv-soso{color:var(--warn);border-color:var(--soso-bd);} .rv-soso:hover{background:var(--soso-bg);}
   .rv-good{color:var(--teal);border-color:var(--good-bd);} .rv-good:hover{background:var(--good-bg);}
