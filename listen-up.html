@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <!-- 배포(네이티브/Pages) 빌드 시 window.LISTEN_UP_API_BASE 주입 지점 (scripts/build-www.js) -->
 <!--__API_BASE__-->
-<title>Listening Miner</title>
+<title>귀트임 — YouTube 영어듣기</title>
 <meta name="description" content="YouTube 로 배우는 영어 듣기 — 어휘 채굴 · 받아쓰기 · 간격 반복 복습" />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Listening Miner — YouTube 로 배우는 영어 듣기" />
+<meta property="og:title" content="귀트임 — YouTube 로 귀가 트이는 영어듣기" />
 <meta property="og:description" content="진짜 영상으로 듣고, 모르는 표현은 탭 한 번으로 채굴하고, 받아쓰기와 간격 반복으로 내 것으로." />
 <meta property="og:image" content="https://jackmir-explorer.github.io/listen-up/icons/icon-512.png" />
 <meta property="og:url" content="https://jackmir-explorer.github.io/listen-up/" />
@@ -314,7 +314,7 @@
 const {useState,useEffect,useRef} = React;
 
 /* ════════════════════════════════════════════════════════
-   LISTENING MINER — 영어 듣기 학습 (프런트엔드, 단일 파일)
+   귀트임(listen-up) — 영어 듣기 학습 (프런트엔드, 단일 파일)
 
    · 데이터: [API LAYER] 가 서버(/api/*) 호출, 재생은 YouTube IFrame API.
    백엔드 계약: POST /api/analyze {text,type}→{ko,en,tag} ·
@@ -512,7 +512,7 @@ function diffWords(refText, typedText){
 function Top({screen,onNav,due}){
   return (
     <div className="topbar">
-      <span className="brand">Listening Miner</span>
+      <span className="brand">귀트임</span>
       <div className="nav">
         <span className={screen==="library"?"on":""} onClick={()=>onNav("library")}>라이브러리</span>
         <span className={screen==="search"?"on":""} onClick={()=>onNav("search")}>검색</span>
@@ -1854,7 +1854,7 @@ function Gate({configured,checking,onLogin,onGuest,onSaveCfg}){
     <div className="gate">
       <div className="gate-card">
         <div className="gate-logo">🎧</div>
-        <div className="gate-h">Listening Miner</div>
+        <div className="gate-h">귀트임</div>
         <p className="gate-p">YouTube 로 배우는 영어 듣기<br/>어휘 채굴 · 받아쓰기 · 간격 반복 복습</p>
         {checking ? (
           <p className="gate-p">로그인 확인 중…</p>

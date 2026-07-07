@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Listening Miner 백엔드 — analyze 엔드포인트",
+  "description": "귀트임(listen-up) 백엔드",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

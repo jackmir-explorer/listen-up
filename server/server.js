@@ -1,5 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║  Listening Miner 백엔드 — analyze 엔드포인트                         ║
+// ║  귀트임(listen-up) 백엔드                                            ║
 // ║                                                                    ║
 // ║  POST /api/analyze   body: { text, type:"word"|"phrase"|"sentence" }║
 // ║                       →    { ko, en, tag }                          ║

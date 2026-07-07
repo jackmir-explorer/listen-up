@@ -1,4 +1,4 @@
-# Listening Miner — 백엔드
+# 귀트임 — 백엔드
 
 영어 듣기 학습 웹앱 `listen-up.html`의 백엔드입니다.
 현재 **`POST /api/analyze`** (표현 분석), **`POST /api/transcript`** (자막), **`POST /api/search`** (검색), **`POST /api/import`** (링크로 직접 추가)가 구현돼 있고, 프런트의 **YouTube IFrame 플레이어**(학습·복습 모두 실제 재생)도 연결됐습니다.
