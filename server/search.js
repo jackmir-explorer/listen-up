@@ -58,13 +58,14 @@ function shuffle(arr) {
 // page: "다른 결과 보기" 누를수록 커지며 더 깊은 검색 페이지를 본다.
 // onResult: (선택) 결과 1건이 확정될 때마다 호출 → 라우트가 NDJSON 으로 즉시 스트리밍.
 const SORTS = new Set(["relevance", "upload_date", "view_count", "rating"]);
-export async function searchVideos({ q = "", minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, sort = "relevance", page = 0 } = {}, onResult) {
+export async function searchVideos({ q = "", minSec = 0, maxSec = 36000, level = 2, topics = [], topicsEn = null, sort = "relevance", mode = "study", page = 0 } = {}, onResult) {
   const yt = await getYt();
   const enTopics = (topicsEn && topicsEn.length ? topicsEn : (topics || []).map((t) => TOPIC_EN[t] || t)).filter(Boolean);
-  const hint = LEVEL_HINTS[Math.max(0, Math.min(LEVEL_HINTS.length - 1, level | 0))] || "";
+  // "일반·전체" 모드는 학습 편향 힌트를 붙이지 않는다 — 주제 그대로 폭넓게 검색.
+  const hint = mode === "general" ? "" : (LEVEL_HINTS[Math.max(0, Math.min(LEVEL_HINTS.length - 1, level | 0))] || "");
   // 자유 검색어가 있으면 그것을 중심으로, 토픽·난이도 힌트를 보조로 조합
   const parts = [String(q || "").trim(), ...enTopics, hint].filter(Boolean);
-  const query = parts.length ? parts.join(" ") : "english podcast interview";
+  const query = parts.length ? parts.join(" ") : (mode === "general" ? "english podcast" : "english podcast interview");
   const sortBy = SORTS.has(sort) ? sort : "relevance";
   // 기본(관련순)은 sort_by 를 아예 넘기지 않는다 — 기존에 검증된 호출 형태 유지.
   const base = { type: "video" };

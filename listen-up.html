@@ -424,6 +424,10 @@ async function searchVideos(filters, onResult){
 //   ⚠ 유튜브 자막은 공식 API가 없어 비공식 추출에 의존 → 가장 잘 깨지는 지점. 실패 시 [] 반환·UI 처리 필요.
 async function fetchTranscript(videoId){
   if(USE_BACKEND){
+    // 0) 공유 자막 캐시(Firestore) — 누군가 한 번 뽑은 영상은 추출 API 를 다시 쓰지 않는다.
+    //    (Supadata 월 한도 절약 + 즉시 로드. 문장부호 복원 결과까지 그대로 재사용)
+    const hit=await cacheGetTranscript(videoId);
+    if(hit) return hit;
     try{
       const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
         headers:{"Content-Type":"application/json",
@@ -431,7 +435,9 @@ async function fetchTranscript(videoId){
           ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})}, // 자동자막 문장부호 복원용
         body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
-      return await res.json();
+      const segs=await res.json();
+      if(Array.isArray(segs)&&segs.length) cacheSetTranscript(videoId,segs); // 백그라운드 캐시 저장
+      return segs;
     }catch(e){ console.error("transcript failed:",e); return []; }
   }
   await sleep(MOCK_DELAY); return mockTranscript(videoId);
@@ -1169,23 +1175,24 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
   const [q,setQ]=useState("");                 // 검색창 입력 중인 값
   const [qDone,setQDone]=useState("");         // 제출된 검색어 (Enter/버튼)
   const [sort,setSort]=useState("relevance");  // 정렬: 관련순|최신순|조회순
+  const [mode,setMode]=useState("study");      // 검색 범위: 학습 중심|일반·전체
   const [qhist,setQhist]=useState(loadQHist());
   // 주제 목록 영속화(추가·삭제 유지)
   useEffect(()=>{ try{localStorage.setItem("listen-up.topics",JSON.stringify(allTopics));}catch(e){} },[allTopics]);
   // 필터 바뀌면 page 0 으로
-  useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics,qDone,sort]);
+  useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics,qDone,sort,mode]);
   // 검색 (검색어·필터·page 변동 시) — 350ms 디바운스 + 결과 스트리밍(오는 대로 추가)
   useEffect(()=>{
     let alive=true; setLoading(true);
     const t=setTimeout(()=>{ if(!alive) return;
       setResults([]);
-      searchVideos({q:qDone,minSec:minM*60,maxSec:maxM*60,level:lvl,topics,sort,page},
+      searchVideos({q:qDone,minSec:minM*60,maxSec:maxM*60,level:lvl,topics,sort,mode,page},
         item=>{ if(alive) setResults(rs=>[...rs,item]); })
         .then(()=>{ if(alive) setLoading(false); })
         .catch(()=>{ if(alive) setLoading(false); });
     },350);
     return ()=>{ alive=false; clearTimeout(t); };
-  },[minM,maxM,lvl,topics,page,qDone,sort]);
+  },[minM,maxM,lvl,topics,page,qDone,sort,mode]);
 
   const submitQ=()=>{ const v=q.trim(); setQDone(v);
     if(v){ saveQHist(v); setQhist(loadQHist()); } };
@@ -1222,6 +1229,14 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
           </div>)}
       </div>
       <div className="sbar">
+        <div className="frow">
+          <span className="flab">범위</span>
+          <div style={{display:"flex",gap:"6px",flexWrap:"wrap",alignItems:"center"}}>
+            {[["study","🎓 학습 중심"],["general","🌐 일반·전체"]].map(([k,lab])=>
+              <span key={k} className={"chip"+(mode===k?" on":"")} onClick={()=>setMode(k)}>{lab}</span>)}
+            <span className="resmeta">{mode==="study"?"영어 학습용 콘텐츠 위주":"주제 그대로 폭넓게 (난이도 편향 없음)"}</span>
+          </div>
+        </div>
         <div className="frow">
           <span className="flab">정렬</span>
           <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
@@ -1637,6 +1652,30 @@ function applyCloudExtras(r){ try{
   if(Array.isArray(s.topics)&&s.topics.length) localStorage.setItem("listen-up.topics",JSON.stringify(s.topics));
   if(Array.isArray(s.qhist)) localStorage.setItem(QHIST_KEY,JSON.stringify(s.qhist));
 }catch(e){} }
+
+/* ── 공유 자막 캐시 (Firestore transcripts/{videoId}) ─────────────
+   어떤 영상이든 전 세계에서 1번만 추출하면 모두가 재사용 — Supadata 월 한도 절약.
+   읽기는 누구나(게스트 포함), 쓰기는 로그인 사용자만 (Firestore 규칙 참고). */
+async function cacheGetTranscript(videoId){
+  if(!getFirebaseConfig()) return null;
+  try{
+    const fb=await loadFirebase();
+    const doc=await fb.firestore().collection("transcripts").doc(String(videoId)).get();
+    if(doc.exists){ const d=doc.data()||{}; if(Array.isArray(d.segs)&&d.segs.length) return d.segs; }
+  }catch(e){ /* 규칙 미설정·오프라인 등 — 캐시 없이 진행 */ }
+  return null;
+}
+async function cacheSetTranscript(videoId,segs){
+  if(!getFirebaseConfig()||!Array.isArray(segs)||!segs.length) return;
+  try{
+    const raw=JSON.stringify(segs);
+    if(raw.length>900000) return;                      // Firestore 문서 1MB 한도 여유
+    const fb=await loadFirebase();
+    if(!fb.auth().currentUser) return;                 // 쓰기는 로그인 필요(규칙)
+    await fb.firestore().collection("transcripts").doc(String(videoId))
+      .set({ segs:JSON.parse(raw), updatedAt:Date.now() });
+  }catch(e){ /* 실패해도 학습엔 지장 없음 */ }
+}
 
 /* 첫 화면 로그인 게이트 — 로그인(또는 게스트 선택) 후에 앱 기능이 열린다 */
 function Gate({configured,checking,onLogin,onGuest,onSaveCfg}){

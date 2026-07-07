@@ -105,7 +105,8 @@ app.post("/api/transcript", async (req, res) => {
     return res.status(400).json({ error: "body 는 { videoId:string } 형식이어야 합니다." });
   }
   try {
-    const supKey = (req.header("x-supadata-key") || "").trim();
+    // 사용자 키(헤더) 우선, 없으면 서버 공용 키(env SUPADATA_API_KEY — 선택) 폴백
+    const supKey = (req.header("x-supadata-key") || "").trim() || (process.env.SUPADATA_API_KEY || "").trim();
     const anthKey = (() => { const k = resolveKey(req); return keyError(k) ? "" : k; })(); // 자동자막 문장부호 복원용(선택)
     const segments = await fetchTranscriptSegments(videoId.trim(), supKey, anthKey);
     return res.json(segments);
@@ -117,25 +118,29 @@ app.post("/api/transcript", async (req, res) => {
 });
 
 // 한글 토픽 → 영어 검색어. 결과 캐시. 키 없으면(또는 영어면) 원문 그대로.
+// mode "study": 영어 학습 콘텐츠 쪽으로 번역 편향 / "general": 중립 번역(주제 그대로)
 const _topicCache = new Map();
-async function toEnglishTopics(topics, apiKey) {
+async function toEnglishTopics(topics, apiKey, mode = "study") {
   const out = [];
+  const system = mode === "general"
+    ? "Translate the Korean topic or search phrase into a short English YouTube search query (1-6 words). Reply with ONLY the query — no quotes, no punctuation, no explanation."
+    : "Translate the Korean topic or search phrase into a short English YouTube search query (1-6 words) for finding English-language listening/learning videos. Reply with ONLY the query — no quotes, no punctuation, no explanation.";
   for (const ko of topics) {
     if (!/[가-힣]/.test(ko)) { out.push(ko); continue; } // 한글 없으면 그대로
-    if (_topicCache.has(ko)) { out.push(_topicCache.get(ko)); continue; }
+    const ck = mode + ":" + ko;
+    if (_topicCache.has(ck)) { out.push(_topicCache.get(ck)); continue; }
     if (keyError(apiKey)) { out.push(ko); continue; }            // 키 없으면 번역 불가 → 원문
     try {
       const anthropic = new Anthropic({ apiKey });
       const msg = await anthropic.messages.create({
         model: MODEL,
         max_tokens: 60,
-        system:
-          "Translate the Korean topic or search phrase into a short English YouTube search query (1-6 words) for finding English-language listening/learning videos. Reply with ONLY the query — no quotes, no punctuation, no explanation.",
+        system,
         messages: [{ role: "user", content: ko }],
       });
       const en = (msg.content.find((b) => b.type === "text")?.text || "").trim().replace(/^["'\s]+|["'\s]+$/g, "");
       const val = en || ko;
-      _topicCache.set(ko, val);
+      _topicCache.set(ck, val);
       out.push(val);
     } catch (e) {
       console.error("topic 번역 실패:", ko, "-", e?.message || e);
@@ -158,9 +163,10 @@ app.post("/api/search", async (req, res) => {
   try {
     const key = resolveKey(req);
     const q = typeof f.q === "string" ? f.q.trim() : "";
+    const mode = f.mode === "general" ? "general" : "study"; // 학습 중심(기본) | 일반·전체
     // 한글 검색어·토픽을 영어로 (캐시됨 — 같은 입력은 재번역 안 함)
-    const [qEn] = q ? await toEnglishTopics([q], key) : [""];
-    const topicsEn = await toEnglishTopics(topics, key);
+    const [qEn] = q ? await toEnglishTopics([q], key, mode) : [""];
+    const topicsEn = await toEnglishTopics(topics, key, mode);
     await searchVideos(
       {
         q: qEn,
@@ -170,6 +176,7 @@ app.post("/api/search", async (req, res) => {
         topics,        // 원본(표시용)
         topicsEn,      // 영어(검색용)
         sort: typeof f.sort === "string" ? f.sort : "relevance",
+        mode,
         page: Number(f.page) || 0,
       },
       (item) => res.write(JSON.stringify(item) + "\n") // 결과 1건 → 한 줄 즉시 전송

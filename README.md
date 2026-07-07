@@ -43,6 +43,8 @@ render.yaml · Dockerfile     백엔드 호스팅 (Render 등)
 **API 키 (앱 ⚙ 설정에 입력 — 코드·서버에 저장 안 됨):**
 - **Anthropic** (`sk-ant-…`) — 어휘 뜻·태그 분석용. [발급](https://console.anthropic.com/settings/keys)
 - **Supadata** — 클라우드 백엔드에서 자막 추출용 (무료 월 100건). [발급](https://supadata.ai)
+  - 자막은 **Firestore 공유 캐시**(`transcripts/{videoId}`)에 저장돼 같은 영상은 다시 호출하지 않음 → 한도 절약
+  - 서버 env `SUPADATA_API_KEY`(선택)를 두면 키 없는 사용자를 위한 공용 폴백으로 동작
 - **GitHub PAT** (`gist` 권한) — 기기 간 동기화용 (선택, Google 로그인 시 불필요)
 
 **Google 로그인 (선택):** [FIREBASE.md](FIREBASE.md) 의 1회 설정(약 10분) 후
