@@ -7,6 +7,11 @@
 <!--__API_BASE__-->
 <title>Listening Miner</title>
 <meta name="description" content="YouTube 로 배우는 영어 듣기 — 어휘 채굴 · 받아쓰기 · 간격 반복 복습" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Listening Miner — YouTube 로 배우는 영어 듣기" />
+<meta property="og:description" content="진짜 영상으로 듣고, 모르는 표현은 탭 한 번으로 채굴하고, 받아쓰기와 간격 반복으로 내 것으로." />
+<meta property="og:image" content="https://jackmir-explorer.github.io/listen-up/icons/icon-512.png" />
+<meta property="og:url" content="https://jackmir-explorer.github.io/listen-up/" />
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f7" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141413" />
 <link rel="manifest" href="./manifest.webmanifest" />
@@ -375,10 +380,15 @@ async function analyze(text, type){
   const hit=await cacheGetAnalyze(text,type);
   if(hit) return hit;
   try{
-      const res=await fetch(apiBase()+"/api/analyze",{method:"POST",
-        headers:{"Content-Type":"application/json", ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})},
-        body:JSON.stringify({text,type})});
-      if(!res.ok) throw new Error("analyze "+res.status);
+    const tok=await fbToken();
+    const res=await fetch(apiBase()+"/api/analyze",{method:"POST",
+      headers:{"Content-Type":"application/json",
+        ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{}),
+        ...(tok?{"x-firebase-token":tok}:{})},
+      body:JSON.stringify({text,type})});
+    if(res.status===429){ const j=await res.json().catch(()=>({}));
+      return {ko:"",en:"",tag:"",err:j.error||"오늘의 무료 사용량을 다 썼어요"}; }
+    if(!res.ok) throw new Error("analyze "+res.status);
     const a=await res.json();
     if(a&&(a.ko||a.en)) cacheSetAnalyze(text,type,a); // 백그라운드 캐시 저장
     return a;
@@ -413,10 +423,13 @@ async function searchVideos(filters, onResult){
 // POST /api/level-titles   body:{ items:[{id,title,channel}] } → { levels:{id:"A2"|"B1"|"B2"|"C1"} }
 // 검색 결과의 난이도를 제목 기반으로 대략 분류 (서버 캐시·Haiku). 키 없거나 실패 시 {}.
 async function classifyLevels(items){
-  if(!items.length || !ANTHROPIC_KEY) return {};
+  if(!items.length) return {};
   try{
+    const tok=await fbToken();
     const res=await fetch(apiBase()+"/api/level-titles",{method:"POST",
-      headers:{"Content-Type":"application/json","x-anthropic-key":ANTHROPIC_KEY},
+      headers:{"Content-Type":"application/json",
+        ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{}),
+        ...(tok?{"x-firebase-token":tok}:{})},
       body:JSON.stringify({items:items.map(r=>({id:r.id,title:r.title,channel:r.channel}))})});
     if(!res.ok) return {};
     return (await res.json()).levels||{};
@@ -432,10 +445,12 @@ async function fetchTranscript(videoId){
   const hit=await cacheGetTranscript(videoId);
   if(hit) return hit;
   try{
+      const tok=await fbToken();
       const res=await fetch(apiBase()+"/api/transcript",{method:"POST",
         headers:{"Content-Type":"application/json",
           ...(SUPADATA_KEY?{"x-supadata-key":SUPADATA_KEY}:{}),
-          ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{})}, // 자동자막 문장부호 복원용
+          ...(ANTHROPIC_KEY?{"x-anthropic-key":ANTHROPIC_KEY}:{}), // 자동자막 문장부호 복원용
+          ...(tok?{"x-firebase-token":tok}:{})},
         body:JSON.stringify({videoId})});
       if(!res.ok) throw new Error("transcript "+res.status);
     const segs=await res.json();
@@ -753,6 +768,18 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
   const flashAct=(m,label,fn)=>{ setToast(m); setToastAct({label,fn});
     clearTimeout(toastT.current); toastT.current=setTimeout(()=>{setToast("");setToastAct(null);},3500); };
 
+  // 자막이 비어 있는 클립: 삭제·재추가 없이 그 자리에서 다시 시도
+  const [txBusy,setTxBusy]=useState(false);
+  const retryTx=async()=>{ if(txBusy) return; setTxBusy(true);
+    const segs=await fetchTranscript(clip.id);
+    setTxBusy(false);
+    if(segs.length && onPersist){
+      onPersist({...clip,vocab,marks,pos:Math.round(time),plays:clip.plays,
+        transcript:segs,total:clip.total||Math.round(segs[segs.length-1].end),
+        level:measureLevel(segs)||clip.level,lvlMeasured:true});
+      flash("자막을 가져왔어요 ✓");
+    } else flash("아직 자막을 못 받았어요 — ⚙ 키 설정을 확인해 주세요"); };
+
   // 오늘 듣기 목표를 넘긴 순간 축하 (statAddListen 이 하루 1회 발행)
   useEffect(()=>{
     const h=()=>{ setToast("🎉 오늘 듣기 목표 "+getGoalMin()+"분 달성!");
@@ -782,7 +809,8 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
       ()=>{ setVocab(v=>v.filter(x=>x.id!==id)); setToast(""); setToastAct(null); });
     const a=await analyze(text,type);
     setVocab(v=>v.map(x=>x.id===id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
-    if(!getAnthropicKey() && !a.ko && !a.en && !a.tag)
+    if(a.err) flash(a.err);   // 일일 무료 한도 초과 등 서버 안내
+    else if(!getAnthropicKey() && !a.ko && !a.en && !a.tag)
       flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 자동 분석돼요");
   };
   const setTag=(id,tag)=>setVocab(v=>v.map(x=>x.id===id?{...x,tag}:x));
@@ -791,7 +819,8 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
     setVocab(v=>v.map(x=>x.id===it.id?{...x,loading:true}:x));
     const a=await analyze(it.text,it.type);
     setVocab(v=>v.map(x=>x.id===it.id?{...x,ko:a.ko,en:a.en,tag:a.tag,loading:false}:x));
-    if(!getAnthropicKey() && !a.ko && !a.en && !a.tag)
+    if(a.err) flash(a.err);
+    else if(!getAnthropicKey() && !a.ko && !a.en && !a.tag)
       flash("⚙ 설정에서 Anthropic 키를 입력하면 뜻·태그가 분석돼요");
   };
   const onWord=(li,wi,tok)=>{
@@ -895,9 +924,10 @@ function Study({clip,initialTime,onClose,onReview,onNav,onPersist,due}){
           <div className="tx" ref={txBoxRef}>
             {TX.length===0 && (
               <div className="tx-empty">
-                이 영상의 자막을 못 받았어요.<br/>
-                ⚙ 설정에 <b>Supadata 자막 키</b>(무료)를 넣으면 클라우드 백엔드에서도 자막이 추출됩니다.<br/>
-                키 입력 후 이 클립을 삭제하고 <b>다시 추가</b>해 보세요.
+                이 영상의 자막을 아직 못 받았어요.<br/>
+                자막이 없는 영상이거나, 자막 추출 한도·설정 문제일 수 있어요.<br/>
+                <button className="rv-show" style={{marginTop:"10px"}} onClick={retryTx}>
+                  {txBusy?"가져오는 중…":"↻ 자막 다시 시도"}</button>
               </div>
             )}
             {TX.map((l,li)=>(
@@ -1137,8 +1167,9 @@ function ReviewMode({cards,sourceLabel,nextDue,more,onMore,onExit,onGrade}){
 function Search({existingIds,onAdd,onImport,onNav,due}){
   const [minM,setMinM]=useState(0);
   const [maxM,setMaxM]=useState(120);
-  const [lvl,setLvl]=useState(2);
-  const [topics,setTopics]=useState([]);
+  // 난이도·선택 주제는 온보딩/이전 사용값에서 복원
+  const [lvl,setLvl]=useState(()=>{ const n=Number(localStorage.getItem("listen-up.lvl")); return n>=0&&n<=3?n:2; });
+  const [topics,setTopics]=useState(()=>{ try{ const s=JSON.parse(localStorage.getItem("listen-up.sel-topics")||"null"); if(Array.isArray(s)) return s; }catch(e){} return []; });
   const [allTopics,setAllTopics]=useState(()=>{ try{const s=JSON.parse(localStorage.getItem("listen-up.topics")); if(Array.isArray(s)&&s.length)return s;}catch(e){} return ["여행","과학","일상","심리","자연·환경","요리"]; });
   const [adding,setAdding]=useState(false);
   const [newTopic,setNewTopic]=useState("");
@@ -1153,27 +1184,31 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
   const [sort,setSort]=useState("relevance");  // 정렬: 관련순|최신순|조회순
   const [mode,setMode]=useState("study");      // 검색 범위: 학습 중심|일반·전체
   const [qhist,setQhist]=useState(loadQHist());
-  // 주제 목록 영속화(추가·삭제 유지)
+  const [slow,setSlow]=useState(false); // 콜드 스타트 안내 (무료 서버 깨우는 중)
+  // 주제 목록·선택·난이도 영속화
   useEffect(()=>{ try{localStorage.setItem("listen-up.topics",JSON.stringify(allTopics));}catch(e){} },[allTopics]);
+  useEffect(()=>{ try{localStorage.setItem("listen-up.sel-topics",JSON.stringify(topics));}catch(e){} },[topics]);
+  useEffect(()=>{ try{localStorage.setItem("listen-up.lvl",String(lvl));}catch(e){} },[lvl]);
   // 필터 바뀌면 page 0 으로
   useEffect(()=>{ setPage(0); },[minM,maxM,lvl,topics,qDone,sort,mode]);
   // 검색 (검색어·필터·page 변동 시) — 350ms 디바운스 + 결과 스트리밍(오는 대로 추가)
   // 스트림이 끝나면 제목 기반 난이도 분류(Haiku·캐시) → 배지 갱신 + 선택 난이도 우선 정렬
   useEffect(()=>{
-    let alive=true; setLoading(true);
+    let alive=true; setLoading(true); setSlow(false);
+    const slowT=setTimeout(()=>{ if(alive) setSlow(true); },6000); // 6초 넘으면 콜드 스타트 안내
     const t=setTimeout(()=>{ if(!alive) return;
       setResults([]);
       const got=[];
       searchVideos({q:qDone,minSec:minM*60,maxSec:maxM*60,level:lvl,topics,sort,mode,page},
         item=>{ if(alive){ got.push(item); setResults(rs=>[...rs,item]); } })
-        .then(async()=>{ if(!alive) return; setLoading(false);
+        .then(async()=>{ if(!alive) return; setLoading(false); setSlow(false);
           const lv=await classifyLevels(got.filter(r=>!r.level));
           if(!alive) return;
           setResults(rs=>sortByLevel(rs.map(r=>lv[r.id]?{...r,level:lv[r.id]}:r), lvl));
         })
-        .catch(()=>{ if(alive) setLoading(false); });
+        .catch(()=>{ if(alive){ setLoading(false); setSlow(false); } });
     },350);
-    return ()=>{ alive=false; clearTimeout(t); };
+    return ()=>{ alive=false; clearTimeout(t); clearTimeout(slowT); };
   },[minM,maxM,lvl,topics,page,qDone,sort,mode]);
 
   const submitQ=()=>{ const v=q.trim(); setQDone(v);
@@ -1263,7 +1298,9 @@ function Search({existingIds,onAdd,onImport,onNav,due}){
         <span className={"addbtn"+(importing?" busy":"")} onClick={doImport}>{importing?"가져오는 중…":"가져오기"}</span>
       </div>
       {loading && results.length===0
-        ? <div className="nores">검색 중…</div>
+        ? <div className="nores">{slow
+            ? <>무료 서버를 깨우는 중이에요… ⏳<br/>잠들어 있던 경우 최대 1분 정도 걸릴 수 있어요.</>
+            : "검색 중…"}</div>
         : results.length===0
           ? <div className="nores">조건에 맞는 콘텐츠가 없어요. 필터를 넓혀 보세요.</div>
           : <div className="grid">
@@ -1427,6 +1464,19 @@ function Browse({clips,onNav,onOpenAt,due,onReviewSet,onReanalyzeAll}){
 /* ── 로컬 영속화: 라이브러리(clips)를 localStorage 에 저장·복원 ──
    study-app 방식(단일 파일 + localStorage). 기기 간 백업은 아래 Gist 동기화로 확장됨. */
 const STORE_KEY = "listen-up.library.v1";
+
+/* Firebase 로그인 토큰 — 서버가 "무료 한도" 계정을 식별할 때 사용 (45분 캐시) */
+let _fbTok={t:"",exp:0};
+async function fbToken(){
+  if(!getFirebaseConfig()) return "";
+  try{
+    const fb=await loadFirebase(); const u=fb.auth().currentUser; if(!u) return "";
+    if(_fbTok.t && Date.now()<_fbTok.exp) return _fbTok.t;
+    const t=await u.getIdToken();
+    _fbTok={t,exp:Date.now()+45*60000};
+    return t;
+  }catch(e){ return ""; }
+}
 
 /* 자막으로 실측 난이도(CEFR) 계산 — 말 속도(WPM) + 문장 복잡도(Flesch-Kincaid 근사).
    LLM 불필요(무료·즉시). 제목 기반 추정보다 정확해 클립 추가 시 레벨을 덮어쓴다. */
@@ -1814,7 +1864,9 @@ function Gate({configured,checking,onLogin,onGuest,onSaveCfg}){
             Google 로 시작하기
           </button>
           <span className="gate-skip" onClick={onGuest}>로그인 없이 둘러보기</span>
-          <p className="gate-note">로그인하면 라이브러리·통계·설정이 계정에 저장돼<br/>어느 기기에서든 이어집니다.</p>
+          <p className="gate-note">로그인하면 라이브러리·통계·설정이 계정에 저장돼<br/>어느 기기에서든 이어집니다.<br/>
+            <a href="https://github.com/jackmir-explorer/listen-up/blob/main/PRIVACY.md"
+              target="_blank" rel="noreferrer" style={{color:"var(--hint)"}}>개인정보 처리방침</a></p>
         </> : <>
           <p className="gate-p" style={{marginBottom:"10px"}}>Google 로그인을 쓰려면 1회 설정이 필요해요.<br/>
             <a className="sync-link" href="https://github.com/jackmir-explorer/listen-up/blob/main/FIREBASE.md"
@@ -1827,6 +1879,46 @@ function Gate({configured,checking,onLogin,onGuest,onSaveCfg}){
         </>}
       </div>
     </div>
+  );
+}
+
+/* 첫 사용자 온보딩 — 수준·관심사만 받고 바로 맞춤 검색으로 (30초) */
+function Onboard({onDone}){
+  const [lvl,setLvl]=useState(1);
+  const [tps,setTps]=useState([]);
+  const ALL=["여행","과학","일상","심리","비즈니스","요리","영화·드라마","테크"];
+  const toggle=t=>setTps(x=>x.includes(t)?x.filter(y=>y!==t):[...x,t]);
+  const start=()=>{
+    try{
+      localStorage.setItem("listen-up.lvl",String(lvl));
+      if(tps.length){
+        localStorage.setItem("listen-up.topics",JSON.stringify(tps));
+        localStorage.setItem("listen-up.sel-topics",JSON.stringify(tps));
+      }
+      localStorage.setItem("listen-up.onboarded","1");
+    }catch(e){}
+    onDone();
+  };
+  return (
+    <div className="gate"><div className="gate-card" style={{textAlign:"left"}}>
+      <div style={{textAlign:"center"}}>
+        <div className="gate-logo">🎧</div>
+        <div className="gate-h">환영해요!</div>
+        <p className="gate-p">30초만 알려주시면 딱 맞는 영상부터 시작해요.</p>
+      </div>
+      <div className="sec-t">내 듣기 수준</div>
+      <div style={{display:"flex",gap:"6px",flexWrap:"wrap",margin:"8px 0 16px"}}>
+        {LEVEL_KO.map((t,i)=><span key={t} className={"chip"+(lvl===i?" on":"")} onClick={()=>setLvl(i)}>{t}</span>)}
+      </div>
+      <div className="sec-t">관심 주제 <span className="muted">— 여러 개 가능</span></div>
+      <div style={{display:"flex",gap:"6px",flexWrap:"wrap",margin:"8px 0 18px"}}>
+        {ALL.map(t=><span key={t} className={"chip"+(tps.includes(t)?" on":"")} onClick={()=>toggle(t)}>{t}</span>)}
+      </div>
+      <p className="gate-note" style={{textAlign:"left",margin:"0 0 14px"}}>
+        이렇게 배워요 — 🎬 진짜 영상 듣기 → ⛏️ 모르는 단어 탭 → ✍️ 받아쓰기 → 🔁 잊을 때쯤 복습
+      </p>
+      <button className="gate-btn g" onClick={start}>맞춤 영상 보러 가기 →</button>
+    </div></div>
   );
 }
 
@@ -2140,6 +2232,9 @@ function App(){
     else if(s==="study"&&openId)setScreen("study"); };
 
   let view;
+  // 첫 사용자 온보딩 (게이트 통과 후, 라이브러리가 빈 최초 1회)
+  const [boarded,setBoarded]=useState(()=>{ try{ return localStorage.getItem("listen-up.onboarded")==="1"; }catch(e){ return true; } });
+
   // 첫 화면 게이트: 로그인 전(게스트 미선택)에는 앱 기능을 열지 않는다.
   if(!user && !guest){
     return <Gate configured={!!getFirebaseConfig()}
@@ -2149,6 +2244,10 @@ function App(){
       onGuest={enterGuest}
       onSaveCfg={t=>{ if(setFirebaseConfig(t)) location.reload();
         else window.alert("설정을 읽지 못했어요. Firebase 콘솔의 firebaseConfig = { … } 부분을 그대로 붙여넣어 주세요."); }}/>;
+  }
+  // 온보딩: 처음이고 라이브러리가 비어 있으면 수준·관심사 → 맞춤 검색으로
+  if(!boarded && clips.length===0){
+    return <Onboard onDone={()=>{ setBoarded(true); setScreen("search"); }}/>;
   }
 
   const dueN=dueCount(clips);
@@ -2171,7 +2270,25 @@ function App(){
       user={user} onLogin={doLogin} onLogout={doLogout}/>
   </>;
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+/* 에러 바운더리 — 컴포넌트 오류가 나도 흰 화면 대신 복구 안내 (데이터는 안전) */
+class ErrorBoundary extends React.Component{
+  constructor(p){ super(p); this.state={err:null}; }
+  static getDerivedStateFromError(e){ return {err:e}; }
+  componentDidCatch(e,info){ console.error("앱 오류:",e,info); }
+  render(){
+    if(this.state.err) return (
+      <div className="gate"><div className="gate-card">
+        <div className="gate-logo">😵</div>
+        <div className="gate-h">앗, 문제가 생겼어요</div>
+        <p className="gate-p">일시적인 오류일 수 있어요. 학습 데이터는 안전하게 저장돼 있습니다.<br/>
+          <span style={{fontSize:"11px",color:"var(--hint)"}}>{String((this.state.err&&this.state.err.message)||this.state.err)}</span></p>
+        <button className="gate-btn g" onClick={()=>location.reload()}>새로고침</button>
+      </div></div>
+    );
+    return this.props.children;
+  }
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App/></ErrorBoundary>);
 </script>
 <script>
 // PWA: 서비스워커 등록 (https/localhost 웹에서만 — file://·네이티브 앱은 제외)

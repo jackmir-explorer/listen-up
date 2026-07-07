@@ -13,6 +13,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import Anthropic from "@anthropic-ai/sdk";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { SYSTEM_PROMPT, OUTPUT_SCHEMA, TAG_SET } from "./functionTags.js";
 import { fetchTranscriptSegments, debugTranscript } from "./transcript.js";
 import { searchVideos, getVideoMeta, extractVideoId } from "./search.js";
@@ -41,6 +42,51 @@ function keyError(key) {
   return null;
 }
 
+/* ── 운영자 키 보호: Firebase 로그인 검증 + 일일 무료 한도 ─────────────
+   사용자가 자기 키(헤더)를 보내면 무제한(본인 비용). 서버 env 키를 쓰게 되는
+   요청만 제한한다 — 로그인 사용자는 넉넉히, 비로그인은 맛보기 수준.
+   (토큰 검증은 구글 공개키(JWKS)로 — 서버에 비밀 불필요) */
+const FB_PROJECT = (process.env.FIREBASE_PROJECT_ID || "listen-up-99d56").trim();
+const JWKS = createRemoteJWKSet(
+  new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
+async function getUid(req) {
+  const tok = (req.header("x-firebase-token") || "").trim();
+  if (!tok) return null;
+  try {
+    const { payload } = await jwtVerify(tok, JWKS, {
+      issuer: `https://securetoken.google.com/${FB_PROJECT}`,
+      audience: FB_PROJECT,
+    });
+    return payload.user_id || payload.sub || null;
+  } catch {
+    return null;
+  }
+}
+// 일일 카운터 (메모리 — 재시작 시 리셋되는 소프트 리밋; 상용 확장 시 Redis 등으로 교체 지점)
+const _usage = new Map();
+function bumpUsage(kind, who) {
+  const k = new Date().toISOString().slice(0, 10) + "|" + kind + "|" + who;
+  const n = (_usage.get(k) || 0) + 1;
+  if (_usage.size > 50000) _usage.clear();
+  _usage.set(k, n);
+  return n;
+}
+const LIMITS = { analyze: { user: 300, anon: 30 }, transcript: { user: 30, anon: 5 }, levels: { user: 100, anon: 10 } };
+// 서버 env 키를 쓰게 되는 요청이면 한도 검사. 통과 시 null, 초과 시 에러 메시지.
+async function checkQuota(req, kind, userKeyHeader, envKey) {
+  if ((req.header(userKeyHeader) || "").trim()) return null; // 본인 키 → 무제한
+  if (!envKey) return null;                                   // 서버 키 없음 → 어차피 키 검사에서 안내
+  const uid = await getUid(req);
+  const who = uid || "ip:" + String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
+  const limit = uid ? LIMITS[kind].user : LIMITS[kind].anon;
+  if (bumpUsage(kind, who) > limit) {
+    return uid
+      ? "오늘의 무료 사용량을 다 썼어요. ⚙ 설정에 내 API 키를 넣으면 제한 없이 쓸 수 있어요."
+      : "무료 사용량을 다 썼어요. Google 로그인하면 한도가 늘어나요.";
+  }
+  return null;
+}
+
 const app = express();
 app.use(cors()); // 로컬 개발용: 모든 출처 허용. 배포 시 origin 제한 권장.
 app.use(express.json());
@@ -66,6 +112,9 @@ app.post("/api/analyze", async (req, res) => {
   const apiKey = resolveKey(req);
   const ke = keyError(apiKey);
   if (ke) { console.error("analyze 키 거부:", ke, "(헤더 키 길이:", (req.header("x-anthropic-key") || "").length, ")"); return res.status(401).json({ error: ke, ko: "", en: "", tag: "" }); }
+  // 운영자 키 보호: 서버 키 사용 시 일일 한도
+  const q = await checkQuota(req, "analyze", "x-anthropic-key", process.env.ANTHROPIC_API_KEY);
+  if (q) return res.status(429).json({ error: q, ko: "", en: "", tag: "" });
 
   try {
     const anthropic = new Anthropic({ apiKey });
@@ -107,6 +156,9 @@ app.post("/api/transcript", async (req, res) => {
     return res.status(400).json({ error: "body 는 { videoId:string } 형식이어야 합니다." });
   }
   try {
+    // 운영자 키 보호: 서버 Supadata 키를 쓰게 되는 요청만 일일 한도
+    const q = await checkQuota(req, "transcript", "x-supadata-key", process.env.SUPADATA_API_KEY);
+    if (q) return res.status(429).json({ error: q });
     // 사용자 키(헤더) 우선, 없으면 서버 공용 키(env SUPADATA_API_KEY — 선택) 폴백
     const supKey = (req.header("x-supadata-key") || "").trim() || (process.env.SUPADATA_API_KEY || "").trim();
     const anthKey = (() => { const k = resolveKey(req); return keyError(k) ? "" : k; })(); // 자동자막 문장부호 복원용(선택)
@@ -143,7 +195,8 @@ app.post("/api/level-titles", async (req, res) => {
     else todo.push({ id, title: String(it.title || "").slice(0, 120), channel: String(it.channel || "").slice(0, 60) });
   }
   const apiKey = resolveKey(req);
-  if (todo.length && !keyError(apiKey)) {
+  const lq = todo.length ? await checkQuota(req, "levels", "x-anthropic-key", process.env.ANTHROPIC_API_KEY) : null;
+  if (todo.length && !lq && !keyError(apiKey)) {
     try {
       const anthropic = new Anthropic({ apiKey });
       const msg = await anthropic.messages.create({

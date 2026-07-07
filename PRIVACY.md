@@ -1,0 +1,28 @@
+# 개인정보 처리방침 (Listening Miner)
+
+최종 수정: 2026-07-07
+
+## 수집·저장하는 정보
+| 항목 | 저장 위치 | 목적 |
+|---|---|---|
+| Google 계정 기본 정보(이름·이메일·프로필 사진·UID) | Firebase Authentication | 로그인·계정 식별 |
+| 학습 데이터(클립 목록·저장한 표현·책갈피·복습 일정·학습 통계·설정) | 사용자 기기(localStorage) 및 본인 계정의 Firestore(`users/{uid}`) | 기기 간 동기화 |
+| 사용자가 입력한 API 키(Anthropic·Supadata) | 사용자 기기 및 본인 계정의 Firestore | 분석·자막 기능. **로그아웃 시 기기에서 삭제** |
+| 자막·표현 분석 결과 캐시 | Firestore 공용 컬렉션(`transcripts`, `analyze`) | 모든 사용자의 API 사용량 절약. **개인 식별 정보 없음** |
+
+## 제3자 전송
+- **YouTube**: 영상 재생·검색 (Google 정책 적용)
+- **Anthropic API**: 저장한 표현·자막 텍스트가 뜻 분석을 위해 전송됨
+- **Supadata API**: 영상 ID 가 자막 추출을 위해 전송됨
+- 광고·트래킹·분석 도구는 사용하지 않습니다.
+
+## 접근 제어
+- `users/{uid}` 데이터는 Firestore 보안 규칙에 의해 **본인만** 읽고 쓸 수 있습니다.
+- 서버(백엔드)는 학습 데이터를 저장하지 않으며, 요청 처리 후 즉시 폐기합니다.
+
+## 데이터 삭제
+- 앱 ⚙ 설정에서 로그아웃하면 이 기기의 키가 삭제됩니다.
+- 계정 데이터 전체 삭제를 원하면 Firebase 콘솔(운영자) 또는 저장소 이슈로 요청해 주세요.
+
+## 문의
+GitHub: https://github.com/jackmir-explorer/listen-up/issues

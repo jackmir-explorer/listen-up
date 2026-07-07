@@ -15,3 +15,9 @@ services:
     envVars:
       - key: PORT
         value: 3001
+      # Firebase 로그인 토큰 검증용 (공개 정보 — 비밀 아님)
+      - key: FIREBASE_PROJECT_ID
+        value: listen-up-99d56
+      # (선택) 운영자 공용 키 — 넣으면 키 없는 사용자에게 일일 무료 한도 제공
+      # - key: ANTHROPIC_API_KEY   ← Render 대시보드에서 sync:false 로 직접 추가
+      # - key: SUPADATA_API_KEY    ← 〃
